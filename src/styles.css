@@ -1,0 +1,109 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@theme {
+  --font-sans: "Figtree", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Fraunces", "Iowan Old Style", "Palatino Linotype", serif;
+  --font-serif: "Fraunces", "Iowan Old Style", "Palatino Linotype", serif;
+
+  --color-background: #f3efe6;
+  --color-foreground: #1c1916;
+  --color-card: #fbf7f0;
+  --color-card-foreground: #1c1916;
+  --color-popover: #fbf7f0;
+  --color-popover-foreground: #1c1916;
+  --color-primary: #2c333c;
+  --color-primary-foreground: #f6f1e8;
+  --color-secondary: #e7e0d3;
+  --color-secondary-foreground: #2c333c;
+  --color-muted: #ebe4d7;
+  --color-muted-foreground: #6e6860;
+  --color-accent: #ddd5c7;
+  --color-accent-foreground: #2c333c;
+  --color-destructive: #8a3f36;
+  --color-border: #d6cec0;
+  --color-input: #d6cec0;
+  --color-ring: #5a6a78;
+  --color-chart-1: #5a6a78;
+  --color-chart-2: #3d6b5a;
+  --color-chart-3: #8a3f36;
+  --color-chart-4: #6e6860;
+  --color-chart-5: #2c333c;
+
+  --radius: 0.75rem;
+  --radius-xs: 0.25rem;
+  --radius-sm: 0.5rem;
+  --radius-md: 0.75rem;
+  --radius-lg: 1rem;
+  --radius-xl: 1.5rem;
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  html {
+    color-scheme: light;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-family: var(--font-sans);
+    line-height: 1.5;
+  }
+
+  h1,
+  h2,
+  h3,
+  .font-display {
+    font-family: var(--font-display);
+    letter-spacing: -0.03em;
+    line-height: 1.15;
+  }
+
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-ring);
+    outline-offset: 2px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+@media print {
+  :root {
+    --color-background: #ffffff;
+    --color-card: #ffffff;
+  }
+
+  body {
+    background: #fff !important;
+    color: #111 !important;
+  }
+
+  .no-print {
+    display: none !important;
+  }
+
+  .print-page {
+    break-after: page;
+  }
+
+  a {
+    text-decoration: none;
+    color: inherit;
+  }
+}
