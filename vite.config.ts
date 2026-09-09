@@ -1,4 +1,4 @@
-import { readdirSync } from "node:fs";
+import { copyFileSync, existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import type { Plugin } from "vite";
 import { defineConfig } from "vite";
@@ -11,6 +11,7 @@ import { grokPwaPlugin } from "./scripts/grok-pwa-plugin.mjs";
 // @ts-expect-error JS plugin alongside the TS vite config
 import { appEnvPlugin } from "./scripts/app-env-plugin.mjs";
 import { isMigrationFile } from "./scripts/migration-plan.mjs";
+import { SECURITY_HEADERS } from "./src/lib/security-headers.ts";
 
 /** The files `src/lib/db.ts` globs — same directory, same non-recursive scope. */
 function hasGlobbedMigrations(root: string): boolean {
@@ -30,6 +31,52 @@ function hasGlobbedMigrations(root: string): boolean {
  * migrations — no schema to apply — skips it entirely rather than paying for a
  * PGLite instance it never queries.
  */
+function securityHeadersPlugin(): Plugin {
+  const apply = (_req: unknown, res: { setHeader: (k: string, v: string) => void }, next: () => void) => {
+    for (const [key, value] of Object.entries(SECURITY_HEADERS)) {
+      res.setHeader(key, value);
+    }
+    next();
+  };
+  return {
+    name: "app-security-headers",
+    configureServer(server) {
+      server.middlewares.use(apply);
+    },
+    configurePreviewServer(server) {
+      server.middlewares.use(apply);
+    },
+  };
+}
+
+/**
+ * Nitro's Vercel bundle inlines `@electric-sql/pglite` but does not copy
+ * `pglite.data` / `pglite.wasm` next to the chunk. Local `vite preview`
+ * (no DATABASE_URL) then crashes on PGLite bootstrap. Copy the assets
+ * after the build and again when the preview server starts.
+ */
+function copyPglitePreviewAssets(): void {
+  const srcDir = join(process.cwd(), "node_modules/@electric-sql/pglite/dist");
+  const destDir = join(process.cwd(), ".vercel/output/functions/__server.func/_libs");
+  if (!existsSync(srcDir) || !existsSync(destDir)) return;
+  for (const file of ["pglite.data", "pglite.wasm", "initdb.wasm"]) {
+    const from = join(srcDir, file);
+    if (existsSync(from)) copyFileSync(from, join(destDir, file));
+  }
+}
+
+function copyPgliteAssetsPlugin(): Plugin {
+  return {
+    name: "app-builder:copy-pglite-assets",
+    closeBundle() {
+      copyPglitePreviewAssets();
+    },
+    configurePreviewServer() {
+      copyPglitePreviewAssets();
+    },
+  };
+}
+
 function pgliteBootstrapPlugin(): Plugin {
   return {
     name: "app-builder:pglite-bootstrap",
@@ -158,6 +205,7 @@ export default defineConfig(({ command, isPreview }) => ({
   },
   resolve: { tsconfigPaths: true },
   plugins: [
+    securityHeadersPlugin(),
     pgliteBootstrapPlugin(),
     // Before tanstackStart so /auth/popup never falls through to the SPA.
     authPopupPlugin(),
@@ -176,6 +224,7 @@ export default defineConfig(({ command, isPreview }) => ({
             // false, so removing this silently unwires /?install=1 on deploys.
             serverDir: "./server",
           }),
+          copyPgliteAssetsPlugin(),
         ]
       : []),
     viteReact(),

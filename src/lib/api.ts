@@ -4,6 +4,33 @@ import { getSql, type Sql } from "@/lib/db";
 import { monthTitle } from "@/lib/catalog";
 import { toNumber } from "@/lib/format";
 import { newId } from "@/lib/utils";
+import { dumpBusiness, restoreBusiness, validateBackupPayload } from "@/lib/backup";
+import { provisionActor } from "@/lib/provision";
+import {
+  addSectionSchema,
+  assignClientServiceSchema,
+  combinedReportSchema,
+  createBackupSchema,
+  createClientSchema,
+  createEmailUserSchema,
+  createServiceSchema,
+  duplicatePeriodSchema,
+  idOnlySchema,
+  includeInactiveSchema,
+  parseInput,
+  reorderSectionsSchema,
+  restoreBackupSchema,
+  saveActivitySchema,
+  savePaymentSchema,
+  unassignClientServiceSchema,
+  updateClientSchema,
+  updateSectionSchema,
+  updateServiceSchema,
+  updateSettingsSchema,
+  updateUserAccessSchema,
+  workspaceQuerySchema,
+  yearMonthSchema,
+} from "@/lib/validation";
 import type {
   Activity,
   AuditRow,
@@ -59,35 +86,12 @@ async function getSettingsRow(sql: Sql): Promise<Settings> {
 }
 
 async function getActor(sql: Sql, userId: string): Promise<Actor> {
-  const users = await sql<{ id: string; name: string; email: string | null }>`
-    select id, name, email from "user" where id = ${userId}`;
-  const user = users[0];
-  const existing = await sql<{ user_id: string; role: Role; is_active: boolean }>`
-    select user_id, role, is_active from app_profiles where user_id = ${userId}`;
-  if (existing[0]) {
-    return {
-      userId,
-      role: existing[0].role,
-      isActive: existing[0].is_active,
-      name: user?.name ?? "User",
-      email: user?.email ?? null,
-    };
+  const before = await sql<{ n: number }>`select count(*)::int as n from app_profiles where user_id = ${userId}`;
+  const actor = await provisionActor(sql, userId);
+  if ((before[0]?.n ?? 0) === 0 && actor.role === "admin" && actor.isActive) {
+    await audit(sql, userId, "user.bootstrap_admin", "profile", userId);
   }
-  const countRows = await sql<{ n: number }>`select count(*)::int as n from app_profiles`;
-  const isFirst = (countRows[0]?.n ?? 0) === 0;
-  const role: Role = isFirst ? "admin" : "viewer";
-  const isActive = isFirst;
-  await sql`insert into app_profiles (user_id, role, is_active)
-    values (${userId}, ${role}, ${isActive})
-    on conflict (user_id) do nothing`;
-  if (isFirst) await audit(sql, userId, "user.bootstrap_admin", "profile", userId);
-  return {
-    userId,
-    role,
-    isActive,
-    name: user?.name ?? "User",
-    email: user?.email ?? null,
-  };
+  return actor;
 }
 
 async function requireActive(sql: Sql, userId: string) {
@@ -571,7 +575,7 @@ export const getSessionWorkspace = createServerFn({ method: "GET" })
 
 export const updateSettings = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
-  .validator((d: { agencyName: string; agencyTagline: string; currency: string; viewersSeePayments: boolean }) => d)
+  .validator(parseInput(updateSettingsSchema))
   .handler(async ({ context, data }) => {
     const sql = await getSql();
     const actor = await requireAdmin(sql, context.userId);
@@ -591,7 +595,7 @@ export const updateSettings = createServerFn({ method: "POST" })
 
 export const listClients = createServerFn({ method: "GET" })
   .middleware([authMiddleware])
-  .validator((d: { includeInactive?: boolean } | undefined) => d ?? {})
+  .validator(parseInput(includeInactiveSchema))
   .handler(async ({ context, data }) => {
     const sql = await getSql();
     await requireActive(sql, context.userId);
@@ -627,7 +631,7 @@ export const listClients = createServerFn({ method: "GET" })
 
 export const createClient = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
-  .validator((d: { name: string; companyName?: string; contactPerson?: string; email?: string; phone?: string; notes?: string }) => d)
+  .validator(parseInput(createClientSchema))
   .handler(async ({ context, data }) => {
     const sql = await getSql();
     const actor = await requireAdmin(sql, context.userId);
@@ -644,7 +648,7 @@ export const createClient = createServerFn({ method: "POST" })
 
 export const updateClient = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
-  .validator((d: { id: string; name: string; companyName?: string; contactPerson?: string; email?: string; phone?: string; notes?: string; isActive?: boolean }) => d)
+  .validator(parseInput(updateClientSchema))
   .handler(async ({ context, data }) => {
     const sql = await getSql();
     const actor = await requireAdmin(sql, context.userId);
@@ -667,7 +671,7 @@ export const updateClient = createServerFn({ method: "POST" })
 
 export const listServices = createServerFn({ method: "GET" })
   .middleware([authMiddleware])
-  .validator((d: { includeInactive?: boolean } | undefined) => d ?? {})
+  .validator(parseInput(includeInactiveSchema))
   .handler(async ({ context, data }) => {
     const sql = await getSql();
     await requireActive(sql, context.userId);
@@ -691,7 +695,7 @@ export const listServices = createServerFn({ method: "GET" })
 
 export const createService = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
-  .validator((d: { name: string; isGlobal?: boolean }) => d)
+  .validator(parseInput(createServiceSchema))
   .handler(async ({ context, data }) => {
     const sql = await getSql();
     const actor = await requireAdmin(sql, context.userId);
@@ -709,7 +713,7 @@ export const createService = createServerFn({ method: "POST" })
 
 export const updateService = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
-  .validator((d: { id: string; name: string; isActive: boolean }) => d)
+  .validator(parseInput(updateServiceSchema))
   .handler(async ({ context, data }) => {
     const sql = await getSql();
     const actor = await requireAdmin(sql, context.userId);
@@ -721,7 +725,7 @@ export const updateService = createServerFn({ method: "POST" })
 
 export const assignClientService = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
-  .validator((d: { clientId: string; serviceId?: string; customName?: string; promote?: boolean }) => d)
+  .validator(parseInput(assignClientServiceSchema))
   .handler(async ({ context, data }) => {
     const sql = await getSql();
     const actor = await requireAdmin(sql, context.userId);
@@ -747,7 +751,7 @@ export const assignClientService = createServerFn({ method: "POST" })
 
 export const unassignClientService = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
-  .validator((d: { clientId: string; serviceId: string }) => d)
+  .validator(parseInput(unassignClientServiceSchema))
   .handler(async ({ context, data }) => {
     const sql = await getSql();
     const actor = await requireAdmin(sql, context.userId);
@@ -758,7 +762,7 @@ export const unassignClientService = createServerFn({ method: "POST" })
 
 export const getWorkspace = createServerFn({ method: "GET" })
   .middleware([authMiddleware])
-  .validator((d: { clientId: string; year: number; month: number }) => d)
+  .validator(parseInput(workspaceQuerySchema))
   .handler(async ({ context, data }): Promise<Workspace> => {
     const sql = await getSql();
     const actor = await requireActive(sql, context.userId);
@@ -809,7 +813,7 @@ export const getWorkspace = createServerFn({ method: "GET" })
 
 export const addSection = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
-  .validator((d: { periodId: string; title: string; serviceId?: string | null }) => d)
+  .validator(parseInput(addSectionSchema))
   .handler(async ({ context, data }) => {
     const sql = await getSql();
     const actor = await requireAdmin(sql, context.userId);
@@ -825,7 +829,7 @@ export const addSection = createServerFn({ method: "POST" })
 
 export const updateSection = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
-  .validator((d: { id: string; title: string }) => d)
+  .validator(parseInput(updateSectionSchema))
   .handler(async ({ context, data }) => {
     const sql = await getSql();
     await requireAdmin(sql, context.userId);
@@ -835,7 +839,7 @@ export const updateSection = createServerFn({ method: "POST" })
 
 export const deleteSection = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
-  .validator((d: { id: string }) => d)
+  .validator(parseInput(idOnlySchema))
   .handler(async ({ context, data }) => {
     const sql = await getSql();
     const actor = await requireAdmin(sql, context.userId);
@@ -846,7 +850,7 @@ export const deleteSection = createServerFn({ method: "POST" })
 
 export const reorderSections = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
-  .validator((d: { ids: string[] }) => d)
+  .validator(parseInput(reorderSectionsSchema))
   .handler(async ({ context, data }) => {
     const sql = await getSql();
     await requireAdmin(sql, context.userId);
@@ -860,17 +864,7 @@ export const reorderSections = createServerFn({ method: "POST" })
 
 export const saveActivity = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
-  .validator((d: {
-    id?: string;
-    sectionId: string;
-    activityDate?: string | null;
-    title: string;
-    description?: string;
-    quantity?: number | null;
-    unit?: string;
-    status: string;
-    notes?: string;
-  }) => d)
+  .validator(parseInput(saveActivitySchema))
   .handler(async ({ context, data }) => {
     const sql = await getSql();
     const actor = await requireAdmin(sql, context.userId);
@@ -898,7 +892,7 @@ export const saveActivity = createServerFn({ method: "POST" })
 
 export const deleteActivity = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
-  .validator((d: { id: string }) => d)
+  .validator(parseInput(idOnlySchema))
   .handler(async ({ context, data }) => {
     const sql = await getSql();
     const actor = await requireAdmin(sql, context.userId);
@@ -909,7 +903,7 @@ export const deleteActivity = createServerFn({ method: "POST" })
 
 export const duplicatePeriod = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
-  .validator((d: { clientId: string; fromYear: number; fromMonth: number; toYear: number; toMonth: number }) => d)
+  .validator(parseInput(duplicatePeriodSchema))
   .handler(async ({ context, data }) => {
     const sql = await getSql();
     const actor = await requireAdmin(sql, context.userId);
@@ -935,17 +929,7 @@ export const duplicatePeriod = createServerFn({ method: "POST" })
 
 export const savePayment = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
-  .validator((d: {
-    id?: string;
-    clientId: string;
-    year: number;
-    month: number;
-    periodId?: string | null;
-    status: string;
-    amount?: number | null;
-    paymentDate?: string | null;
-    notes?: string;
-  }) => d)
+  .validator(parseInput(savePaymentSchema))
   .handler(async ({ context, data }) => {
     const sql = await getSql();
     const actor = await requireAdmin(sql, context.userId);
@@ -967,7 +951,7 @@ export const savePayment = createServerFn({ method: "POST" })
 
 export const deletePayment = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
-  .validator((d: { id: string }) => d)
+  .validator(parseInput(idOnlySchema))
   .handler(async ({ context, data }) => {
     const sql = await getSql();
     const actor = await requireAdmin(sql, context.userId);
@@ -978,7 +962,7 @@ export const deletePayment = createServerFn({ method: "POST" })
 
 export const listPayments = createServerFn({ method: "GET" })
   .middleware([authMiddleware])
-  .validator((d: { year: number; month: number }) => d)
+  .validator(parseInput(yearMonthSchema))
   .handler(async ({ context, data }) => {
     const sql = await getSql();
     const actor = await requireActive(sql, context.userId);
@@ -1032,7 +1016,7 @@ function summariseWork(sections: Section[]) {
 
 export const getDashboard = createServerFn({ method: "GET" })
   .middleware([authMiddleware])
-  .validator((d: { year: number; month: number }) => d)
+  .validator(parseInput(yearMonthSchema))
   .handler(async ({ context, data }): Promise<Dashboard> => {
     const sql = await getSql();
     const actor = await requireActive(sql, context.userId);
@@ -1068,7 +1052,7 @@ export const getDashboard = createServerFn({ method: "GET" })
         activityCount: summary.total,
         completedCount: summary.completed,
         workSummary: summary.bits.join(" · ") || "No work recorded",
-        paymentStatus: payStatus,
+        paymentStatus: canSeePayments(actor, settings) ? payStatus : "—",
         paymentAmount: canSeePayments(actor, settings) ? received || pending || null : null,
       });
     }
@@ -1088,8 +1072,8 @@ export const getDashboard = createServerFn({ method: "GET" })
 
 export const getMonthSummary = createServerFn({ method: "GET" })
   .middleware([authMiddleware])
-  .validator((d: { year: number; month: number }) => d)
-  .handler(async ({ context, data }): Promise<MonthSummary> => {
+  .validator(parseInput(yearMonthSchema))
+  .handler(async ({ data }): Promise<MonthSummary> => {
     const dash = await getDashboard({ data });
     const statusCounts: Record<string, number> = {};
     return {
@@ -1112,7 +1096,7 @@ export const getMonthSummary = createServerFn({ method: "GET" })
 
 export const getFounderSummary = createServerFn({ method: "GET" })
   .middleware([authMiddleware])
-  .validator((d: { year: number; month: number }) => d)
+  .validator(parseInput(yearMonthSchema))
   .handler(async ({ context, data }): Promise<FounderSummary> => {
     const sql = await getSql();
     await requireActive(sql, context.userId);
@@ -1162,7 +1146,7 @@ export const getFounderSummary = createServerFn({ method: "GET" })
 
 export const getClientReport = createServerFn({ method: "GET" })
   .middleware([authMiddleware])
-  .validator((d: { clientId: string; year: number; month: number }) => d)
+  .validator(parseInput(workspaceQuerySchema))
   .handler(async ({ context, data }): Promise<ClientReport> => {
     const sql = await getSql();
     const actor = await requireActive(sql, context.userId);
@@ -1181,7 +1165,7 @@ export const getClientReport = createServerFn({ method: "GET" })
 
 export const getCombinedReport = createServerFn({ method: "GET" })
   .middleware([authMiddleware])
-  .validator((d: { clientIds: string[]; year: number; month: number }) => d)
+  .validator(parseInput(combinedReportSchema))
   .handler(async ({ context, data }): Promise<{ reports: ClientReport[]; settings: Settings }> => {
     const sql = await getSql();
     const actor = await requireActive(sql, context.userId);
@@ -1232,7 +1216,7 @@ export const listUsers = createServerFn({ method: "GET" })
 
 export const updateUserAccess = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
-  .validator((d: { userId: string; role?: Role; isActive?: boolean }) => d)
+  .validator(parseInput(updateUserAccessSchema))
   .handler(async ({ context, data }) => {
     const sql = await getSql();
     const actor = await requireAdmin(sql, context.userId);
@@ -1259,7 +1243,7 @@ export const updateUserAccess = createServerFn({ method: "POST" })
 
 export const createEmailUser = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
-  .validator((d: { name: string; email: string; password: string; role: Role }) => d)
+  .validator(parseInput(createEmailUserSchema))
   .handler(async ({ context, data }) => {
     const sql = await getSql();
     const actor = await requireAdmin(sql, context.userId);
@@ -1308,7 +1292,7 @@ export const listAudit = createServerFn({ method: "GET" })
 
 export const createBackup = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
-  .validator((d: { note?: string } | undefined) => d ?? {})
+  .validator(parseInput(createBackupSchema))
   .handler(async ({ context, data }) => {
     const sql = await getSql();
     const actor = await requireAdmin(sql, context.userId);
@@ -1338,75 +1322,33 @@ export const listBackups = createServerFn({ method: "GET" })
 
 export const restoreBackup = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
-  .validator((d: { id?: string; payload?: unknown }) => d)
+  .validator(parseInput(restoreBackupSchema))
   .handler(async ({ context, data }) => {
     const sql = await getSql();
     const actor = await requireAdmin(sql, context.userId);
+    let payload = data.payload;
+    if (payload === undefined && data.id) {
+      const rows = await sql<{ payload: string }>`select payload from backups where id = ${data.id}`;
+      if (!rows[0]) throw new Error("Backup not found.");
+      try {
+        payload = JSON.parse(rows[0].payload) as unknown;
+      } catch {
+        throw new Error("Backup file is not valid JSON.");
+      }
+    }
+    if (payload === undefined) throw new Error("Nothing to restore.");
+    validateBackupPayload(payload);
     const safety = await dumpBusiness(sql);
     await sql`insert into backups (id, created_by, note, payload)
       values (${newId()}, ${actor.userId}, ${"Safety copy before restore"}, ${JSON.stringify(safety)})`;
-    let payload = data.payload as Awaited<ReturnType<typeof dumpBusiness>> | undefined;
-    if (!payload && data.id) {
-      const rows = await sql<{ payload: string }>`select payload from backups where id = ${data.id}`;
-      if (!rows[0]) throw new Error("Backup not found.");
-      payload = JSON.parse(rows[0].payload) as Awaited<ReturnType<typeof dumpBusiness>>;
+    try {
+      await restoreBusiness(sql, payload);
+    } catch (err) {
+      if (err instanceof Error && err.name === "BackupValidationError") throw err;
+      throw new Error("Restore failed. Existing data was left unchanged.");
     }
-    if (!payload) throw new Error("Nothing to restore.");
-    await restoreBusiness(sql, payload);
     await audit(sql, actor.userId, "backup.restore", "backup", data.id ?? "", "");
     return { ok: true };
   });
 
-async function dumpBusiness(sql: Sql) {
-  const tables = [
-    "clients",
-    "service_library",
-    "client_services",
-    "report_periods",
-    "report_sections",
-    "activities",
-    "payments",
-    "report_exports",
-    "app_settings",
-  ] as const;
-  const out: Record<string, unknown[]> = {};
-  for (const t of tables) {
-    out[t] = await sql.query(`select * from ${t}`);
-  }
-  return out;
-}
 
-async function restoreBusiness(sql: Sql, payload: Record<string, unknown[]>) {
-  await sql.query("delete from activities");
-  await sql.query("delete from report_sections");
-  await sql.query("delete from payments");
-  await sql.query("delete from report_exports");
-  await sql.query("delete from client_services");
-  await sql.query("delete from report_periods");
-  await sql.query("delete from clients");
-  await sql.query("delete from service_library");
-  await sql.query("delete from app_settings");
-  const order = [
-    "service_library",
-    "clients",
-    "client_services",
-    "report_periods",
-    "report_sections",
-    "activities",
-    "payments",
-    "report_exports",
-    "app_settings",
-  ];
-  for (const table of order) {
-    const rows = payload[table] ?? [];
-    for (const row of rows) {
-      const obj = row as Record<string, unknown>;
-      const keys = Object.keys(obj);
-      if (!keys.length) continue;
-      const cols = keys.map((k) => `"${k}"`).join(", ");
-      const placeholders = keys.map((_, i) => `$${i + 1}`).join(", ");
-      const values = keys.map((k) => obj[k]);
-      await sql.query(`insert into ${table} (${cols}) values (${placeholders})`, values);
-    }
-  }
-}
