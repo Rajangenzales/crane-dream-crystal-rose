@@ -16,14 +16,6 @@ function appName(): string {
   return String(process.env.VITE_APP_NAME ?? "FirmOS").trim() || "FirmOS";
 }
 
-function requestHost(event: PwaEvent): string {
-  return (
-    event.req.headers.get("x-forwarded-host") ??
-    event.req.headers.get("host") ??
-    event.url.host
-  );
-}
-
 function acceptsHtml(value: string | null): boolean {
   return !value || value.includes("text/html") || value.includes("*/*");
 }
@@ -61,24 +53,31 @@ function renderInstallPage(url: string): string {
     .replaceAll("{{APP_URL}}", url.split("?", 1)[0] ?? "/");
 }
 
-function htmlMeta(): string {
-  const name = appName().replaceAll('"', '&quot;');
-  return [
-    `<meta property="og:title" content="${name}">`,
-    `<meta property="og:site_name" content="${name}">`,
-    '<meta property="og:type" content="website">',
-  ].join("\n");
-}
-
 function injectHead(html: string): string {
+  const name = appName().replaceAll('"', '&quot;');
   const tags = [
-    '<link rel="manifest" href="/manifest.webmanifest">',
-    '<meta name="apple-mobile-web-app-capable" content="yes">',
-    `<meta name="apple-mobile-web-app-title" content="${appName().replaceAll('"', '&quot;')}">`,
-    '<meta name="theme-color" content="#ffffff">',
-    htmlMeta(),
-  ].join("\n");
-  return html.replace(/<\/head>/i, `${tags}\n</head>`);
+    !/<link\b[^>]*rel=["']manifest["']/i.test(html) ? '<link rel="manifest" href="/manifest.webmanifest">' : "",
+    !/<meta\b[^>]*name=["']apple-mobile-web-app-capable["']/i.test(html)
+      ? '<meta name="apple-mobile-web-app-capable" content="yes">'
+      : "",
+    !/<meta\b[^>]*name=["']apple-mobile-web-app-title["']/i.test(html)
+      ? `<meta name="apple-mobile-web-app-title" content="${name}">`
+      : "",
+    !/<meta\b[^>]*name=["']theme-color["']/i.test(html)
+      ? '<meta name="theme-color" content="#ffffff">'
+      : "",
+    !/<meta\b[^>]*property=["']og:title["']/i.test(html)
+      ? `<meta property="og:title" content="${name}">`
+      : "",
+    !/<meta\b[^>]*property=["']og:site_name["']/i.test(html)
+      ? `<meta property="og:site_name" content="${name}">`
+      : "",
+    !/<meta\b[^>]*property=["']og:type["']/i.test(html)
+      ? '<meta property="og:type" content="website">'
+      : "",
+  ].filter(Boolean);
+  if (!tags.length) return html;
+  return html.replace(/<\/head>/i, `${tags.join("\n")}\n</head>`);
 }
 
 function injectHeadStreaming(response: Response): Response {
