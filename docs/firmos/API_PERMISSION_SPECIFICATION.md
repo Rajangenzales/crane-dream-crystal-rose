@@ -10,44 +10,56 @@ Permissions are action-oriented. Scope determines where an allowed action applie
 
 ## Initial Permission Families
 
+Stored keys are dotted and action-oriented (`clients.edit`). Spec names remain
+SCREAMING_SNAKE for documentation. Authorization decisions use the stored key
+only. Permission **keys** are a global catalog; firms compose them into roles.
+
+### Firm (governance)
+- `firm.view`
+- `firm.manage`
+
 ### Clients
-- CLIENT_VIEW
-- CLIENT_CREATE
-- CLIENT_EDIT
-- CLIENT_ARCHIVE
+- CLIENT_VIEW → `clients.view`
+- CLIENT_CREATE → `clients.create`
+- CLIENT_EDIT → `clients.edit`
+- CLIENT_ARCHIVE → `clients.archive`
 
 ### Services
-- SERVICE_VIEW
-- SERVICE_CREATE
-- SERVICE_EDIT
+- SERVICE_VIEW → `services.view`
+- SERVICE_CREATE → `services.create`
+- SERVICE_EDIT → `services.edit`
 
 ### Work
-- WORK_VIEW
-- WORK_CREATE
-- WORK_ASSIGN
-- WORK_UPDATE
-- WORK_REVIEW
-- WORK_COMPLETE
+- WORK_VIEW → `work.view`
+- WORK_CREATE → `work.create`
+- WORK_ASSIGN → `work.assign`
+- WORK_UPDATE → `work.update`
+- WORK_REVIEW → `work.review`
+- WORK_COMPLETE → `work.complete`
 
 ### Finance
-- FINANCE_VIEW
-- INVOICE_CREATE
-- PAYMENT_CREATE
-- PAYMENT_CORRECT
+- FINANCE_VIEW → `finance.view`
+- INVOICE_CREATE → `invoices.create`
+- PAYMENT_CREATE → `payments.create`
+- PAYMENT_CORRECT → `payments.correct`
 
 ### Reports
-- REPORT_VIEW
-- REPORT_GENERATE
+- REPORT_VIEW → `reports.view`
+- REPORT_GENERATE → `reports.generate`
+- `reports.export` (spec additive)
 
 ### Users / Governance
-- USER_VIEW
-- USER_CREATE
-- USER_EDIT
-- USER_DISABLE
+- USER_VIEW → `users.view`
+- USER_CREATE → `users.create`
+- USER_EDIT → `users.edit`
+- USER_DISABLE → `users.disable`
+- `roles.view`
+- `roles.manage`
+- `audit.view`
 
 ### Operations
-- BACKUP_CREATE
-- BACKUP_RESTORE
+- BACKUP_CREATE → `backup.create`
+- BACKUP_RESTORE → `backup.restore`
 
 ## API Rules
 - Authentication is required for protected endpoints.

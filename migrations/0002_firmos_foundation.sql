@@ -66,28 +66,38 @@ create index if not exists idx_firm_memberships_firm_id on firm_memberships(firm
 create index if not exists idx_firm_memberships_user_id on firm_memberships(user_id);
 create index if not exists idx_membership_roles_role_id on membership_roles(role_id);
 
--- Stable permission vocabulary. Firms may compose these permissions into their
--- own roles without changing application code.
+-- Stable permission vocabulary. Keys are a global catalog; firms compose them
+-- into roles without copying permission rows per tenant.
 insert into permissions (key, description) values
   ('firm.view', 'View firm settings and identity'),
   ('firm.manage', 'Manage firm settings and configuration'),
-  ('members.view', 'View firm members'),
-  ('members.manage', 'Create, edit, suspend and remove firm members'),
+  ('users.view', 'View firm members'),
+  ('users.create', 'Create firm members'),
+  ('users.edit', 'Edit firm members'),
+  ('users.disable', 'Suspend or disable firm members'),
   ('roles.view', 'View roles and permissions'),
   ('roles.manage', 'Create and manage firm roles and their permissions'),
   ('clients.view', 'View clients'),
-  ('clients.manage', 'Create and manage clients'),
+  ('clients.create', 'Create clients'),
+  ('clients.edit', 'Edit clients'),
+  ('clients.archive', 'Archive clients'),
   ('services.view', 'View services'),
-  ('services.manage', 'Create and manage services'),
+  ('services.create', 'Create services'),
+  ('services.edit', 'Edit services'),
   ('work.view', 'View assigned or permitted work'),
-  ('work.manage', 'Create and manage work items and assignments'),
+  ('work.create', 'Create work items'),
+  ('work.update', 'Update work items'),
   ('work.assign', 'Assign work to firm members'),
+  ('work.review', 'Review work items'),
+  ('work.complete', 'Complete work items'),
   ('finance.view', 'View permitted financial records'),
-  ('finance.manage', 'Create and manage financial records'),
-  ('finance.correct', 'Correct financial records with audit trail'),
+  ('invoices.create', 'Create invoices'),
+  ('payments.create', 'Record payments'),
+  ('payments.correct', 'Correct financial records with audit trail'),
   ('reports.view', 'View permitted reports'),
   ('reports.generate', 'Generate reports'),
   ('reports.export', 'Export reports'),
-  ('backup.manage', 'Create and restore firm backups'),
+  ('backup.create', 'Create firm backups'),
+  ('backup.restore', 'Restore firm backups'),
   ('audit.view', 'View firm audit events')
 on conflict (key) do nothing;

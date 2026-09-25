@@ -12,8 +12,8 @@
 - firms
 - users
 - memberships
-- roles
-- permissions
+- roles (per-firm named collections of permission keys)
+- permissions (global catalog of atomic keys; not copied per tenant)
 - role_permissions
 - membership_roles
 - clients
@@ -36,6 +36,9 @@
 
 ## Tenant Rule
 Tenant identity is part of the data model, but raw tenant IDs must never be treated as proof of authorization. Server-side membership and permission checks are mandatory.
+
+## Permission Catalog Rule
+`permissions.key` values are a global vocabulary shared by every firm. `roles` are tenant-scoped. Firms grant catalog keys through `role_permissions`; they must not insert per-firm copies of the same capability.
 
 ## Financial Rule
 Payments and allocations are separate from work completion. Corrections must preserve an auditable history rather than silently rewriting financial history.

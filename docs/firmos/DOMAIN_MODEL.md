@@ -26,8 +26,8 @@ User
 - Firm: tenant boundary and firm-level configuration.
 - User: authenticated human identity.
 - Membership: relationship between a user and a firm.
-- Role: named collection of permissions.
-- Permission: atomic capability such as CLIENT_EDIT or PAYMENT_CREATE.
+- Role: named, firm-scoped collection of permissions.
+- Permission: atomic capability stored as a global key such as `clients.edit` or `payments.create` (spec names: CLIENT_EDIT, PAYMENT_CREATE). Permission keys are a global catalog; firms compose them into roles and do not copy permission rows per tenant.
 - Client: customer/business managed by a firm.
 - Contact: person associated with a client.
 - Service: tenant-defined service catalogue item.
