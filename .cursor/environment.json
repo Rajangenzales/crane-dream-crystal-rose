@@ -1,0 +1,5 @@
+{
+  "name": "Monthly (TanStack Start)",
+  "install": "npm ci && npx playwright install chromium",
+  "start": "sh /workspace/startup.sh"
+}
