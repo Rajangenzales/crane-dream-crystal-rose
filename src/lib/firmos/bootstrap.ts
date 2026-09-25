@@ -3,7 +3,7 @@ import {
   type AuthorizationContext,
   type FirmOSPermission,
   type RoleId,
-} from "./domain";
+} from "./domain.ts";
 
 const MANAGER_PERMISSIONS = [
   "firm.view",
