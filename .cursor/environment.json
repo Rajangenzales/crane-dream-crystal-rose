@@ -1,5 +1,5 @@
 {
   "name": "Monthly (TanStack Start)",
-  "install": "npm ci && npx playwright install chromium",
+  "install": "bash scripts/cloud-agent-install.sh",
   "start": "sh /workspace/startup.sh"
 }

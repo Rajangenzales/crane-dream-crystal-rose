@@ -344,7 +344,7 @@ in-browser say so and ship the best web-only build.
 ## Cursor Cloud Agent environment
 
 Repository-managed setup lives in **`.cursor/environment.json`**: `install` runs
-`npm ci` and `npx playwright install chromium`; `start` runs **`/workspace/startup.sh`** (idempotent dev server on
+`bash scripts/cloud-agent-install.sh` (`npm ci` + Playwright Chromium); `start` runs **`/workspace/startup.sh`** (idempotent dev server on
 `0.0.0.0:8080` via `npm run dev`). After dependency changes, run `npm ci` again;
 never start Vite directly.
 
