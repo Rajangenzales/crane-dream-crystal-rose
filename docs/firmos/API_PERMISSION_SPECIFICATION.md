@@ -64,6 +64,8 @@ only. Permission **keys** are a global catalog; firms compose them into roles.
 ## API Rules
 - Authentication is required for protected endpoints.
 - Tenant context is derived from authenticated membership, not trusted client input.
+- A client-supplied firm id is only a hint: the server resolves an active membership for the authenticated user in that firm, or denies. If no firm id is supplied, resolution succeeds only when the user has exactly one active membership in an active firm.
+- Permission sets come from stored role assignments. Clients cannot submit permissions, roles, membership status, or an owner user id.
 - Authorization is enforced server-side for every protected action.
 - Input is validated at API boundaries.
 - Errors returned to users are sanitized and receive a reference ID where appropriate.

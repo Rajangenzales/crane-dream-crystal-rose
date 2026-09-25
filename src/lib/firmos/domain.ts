@@ -128,7 +128,8 @@ export interface AuthorizationScope {
 
 /**
  * Server-constructed authorization snapshot. Never deserialize this from the
- * client. Membership resolution and `authorize()` land in later phases.
+ * client. Build it only via the membership resolver from authenticated identity
+ * and stored role assignments.
  */
 export interface AuthorizationContext {
   userId: UserId;
@@ -140,6 +141,14 @@ export interface AuthorizationContext {
   firmIsActive: true;
   scope: AuthorizationScope;
 }
+
+export type AuthorizationDeniedReason =
+  | "unauthenticated"
+  | "membership_not_found"
+  | "membership_not_active"
+  | "firm_inactive"
+  | "unknown_firm"
+  | "no_roles";
 
 export function hasPermission(
   context: AuthorizationContext,

@@ -77,7 +77,6 @@ export interface FirmBootstrapInput {
   slug: string;
   timezone?: string;
   currencyCode?: string;
-  ownerUserId: string;
   ownerDisplayName?: string;
 }
 
@@ -90,9 +89,19 @@ export interface FirmBootstrapResult {
 export function validateFirmBootstrapInput(input: FirmBootstrapInput): void {
   if (!input.firmName.trim()) throw new Error("Firm name is required");
   if (!input.slug.trim()) throw new Error("Firm slug is required");
-  if (!input.ownerUserId.trim()) throw new Error("Owner user is required");
 }
 
+/** Owner identity is always the authenticated user, never a client-supplied id. */
+export function bootstrapOwnerUserId(authenticatedUserId: string): string {
+  const userId = authenticatedUserId.trim();
+  if (!userId) throw new Error("Owner user is required");
+  return userId;
+}
+
+/**
+ * Test/helper snapshot of the Owner grant set. Not a membership resolver.
+ * Live authorization must use `resolveAuthorization`.
+ */
 export function ownerAuthorizationContext(
   firmId: string,
   userId: string,
