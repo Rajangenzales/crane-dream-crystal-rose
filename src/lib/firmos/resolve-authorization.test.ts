@@ -14,7 +14,9 @@ import { resolveAuthorization } from "./resolve-authorization.ts";
 
 async function createFirmosSql() {
   const { sql, pg } = await createTestSql();
-  await pg.exec(readFileSync(join(process.cwd(), "migrations/0002_firmos_foundation.sql"), "utf8"));
+  const root = join(process.cwd(), "migrations");
+  await pg.exec(readFileSync(join(root, "0002_firmos_foundation.sql"), "utf8"));
+  await pg.exec(readFileSync(join(root, "0004_firmos_membership_integrity.sql"), "utf8"));
   return { sql, pg };
 }
 

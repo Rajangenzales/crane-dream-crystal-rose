@@ -35,6 +35,7 @@ export interface FirmMembership {
   userId: UserId;
   status: MembershipStatus;
   displayName: string | null;
+  /** Resolved from membership_roles; not a stored column. */
   roleIds: RoleId[];
 }
 

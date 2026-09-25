@@ -10,12 +10,12 @@
 
 ## Core Tables / Aggregates
 - firms
-- users
-- memberships
+- `"user"` (Better Auth identity; there is no separate FirmOS `users` table)
+- firm_memberships (canonical User↔Firm membership; not `memberships`)
 - roles (per-firm named collections of permission keys)
 - permissions (global catalog of atomic keys; not copied per tenant)
 - role_permissions
-- membership_roles
+- membership_roles (same-firm only: a membership cannot hold a role from another firm)
 - clients
 - contacts
 - services
@@ -39,6 +39,13 @@ Tenant identity is part of the data model, but raw tenant IDs must never be trea
 
 ## Permission Catalog Rule
 `permissions.key` values are a global vocabulary shared by every firm. `roles` are tenant-scoped. Firms grant catalog keys through `role_permissions`; they must not insert per-firm copies of the same capability.
+
+## Membership Integrity Rule
+`firm_memberships` is the FirmOS membership table. `membership_roles` is constrained so `firm_memberships.firm_id` equals `roles.firm_id` (trigger stamps `membership_roles.firm_id` from the membership; composite foreign keys enforce both parents). Application code is not the only line of defense.
+
+User identity is Better Auth `"user"`. `firm_memberships.user_id` is `text` without a foreign key to `"user"("id")`: preview/dev fixtures and first-insert ordering are not guaranteed to have a matching `"user"` row, and a second FirmOS `users` table is not introduced.
+
+Deleting a firm cascades its roles, memberships, and `membership_roles` rows. The global `permissions` catalog is not tenant-owned and is not deleted.
 
 ## Financial Rule
 Payments and allocations are separate from work completion. Corrections must preserve an auditable history rather than silently rewriting financial history.
