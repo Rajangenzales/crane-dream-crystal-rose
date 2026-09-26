@@ -5,17 +5,12 @@
  *
  * `npm run dev`, `npm run build` and `npm run preview` all get the flag from
  * `scripts/with-app-env.mjs`, so they agree by construction — but a dev server
- * started outside npm (`npx vite dev`) does not, and the result is sign-in
- * visible in the live preview and absent from the built output, or the reverse.
+ * started outside npm (`npx vite dev`) does not.
  *
  * The two sides compared:
  *  - **dev**: what the running server resolved, read from the `/__app-env`
  *    endpoint the template's dev-only `appEnvPlugin` serves.
  *  - **build**: what the wrapper hands `vite build` / `vite preview`.
- *
- * The built bundle is not read: Vite inlines the flag and the minifier folds
- * `"false" !== "false"` away, so the built client JS carries no marker to
- * compare against unless the app is made to emit one.
  *
  * `scripts/browser-smoke.mjs` runs the comparison on every smoke; run it
  * standalone against a live dev server with `npm run check:auth` (exit 0 agree,
@@ -56,7 +51,7 @@ export function compareAuthInvariant({ devAuthEnabled, buildAuthEnabled }) {
       `[auth-invariant] dev server has sign-in ${label(devAuthEnabled)} but the next ` +
       `build has it ${label(buildAuthEnabled)}. Start the app with \`npm run dev\` — ` +
       "invoking vite directly skips scripts/with-app-env.mjs, so the dev server and " +
-      "the built output resolve .grok/app-env.json differently.",
+      "the built output resolve different application environment sources.",
   };
 }
 
