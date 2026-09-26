@@ -1,0 +1,5 @@
+{
+  "name": "Monthly (TanStack Start)",
+  "install": "bash scripts/cloud-agent-install.sh",
+  "start": "sh /workspace/startup.sh"
+}

@@ -128,9 +128,10 @@ back the dev server and anything else the preview needs. **Rules
    you first bring the preview up; don't claim the app runs without it.
 3. **Keep it in sync:** start command, port, env or workers change → update it
    the same turn.
-4. **Idempotent and non-blocking:** probe `http://127.0.0.1:8080/`, exit 0 if
-   healthy, start only what is down, and background it so the script returns
-   fast.
+4. **Idempotent and non-blocking:** if `node_modules` is missing (fresh checkout),
+   run `bash scripts/cloud-agent-install.sh` first; probe `http://127.0.0.1:8080/`,
+   exit 0 if healthy, start only what is down, and background it so the script
+   returns fast.
 5. **Bind the preview** on **`0.0.0.0:8080`**, and keep **no secrets** that
    shouldn't live in the workspace snapshot.
 6. **Start the app with `npm run dev` — never `vite` / `npx vite` directly**,
@@ -338,6 +339,20 @@ in-browser say so and ship the best web-only build.
   runs.
 - **Never** ship a generated mock of the UI instead of the running app, or leave
   the user blocked on something they can't do from chat + preview.
+
+---
+
+## Cursor Cloud Agent environment
+
+Repository-managed setup lives in **`.cursor/environment.json`**: `install` runs
+`bash scripts/cloud-agent-install.sh` (`npm ci` + Playwright Chromium); `start` runs **`/workspace/startup.sh`** (idempotent dev server on
+`0.0.0.0:8080` via `npm run dev`). After dependency changes, run `npm ci` again;
+never start Vite directly.
+
+**Verification** (matches CI): `npm run typecheck`, `npm run lint`, `npm test`,
+`npm run build`. Without `DATABASE_URL`, the app uses embedded PGLite; migrations
+apply on startup. Playwright smoke: `node scripts/browser-smoke.mjs` against the
+dev server. Node **22** required.
 
 ---
 
