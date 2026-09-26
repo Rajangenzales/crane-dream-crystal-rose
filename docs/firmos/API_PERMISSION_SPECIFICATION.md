@@ -68,7 +68,8 @@ only. Permission **keys** are a global catalog; firms compose them into roles.
 - Permission sets come from stored role assignments. Clients cannot submit permissions, roles, membership status, or an owner user id.
 - Authorization is enforced server-side for every protected action.
 - Input is validated at API boundaries.
-- Errors returned to users are sanitized and receive a reference ID where appropriate.
+- Errors returned to users are sanitized and receive a reference ID where appropriate. FirmOS authorization denials use `FirmOSAuthorizationError`: the public payload is only `publicMessage` plus `referenceId`. Permission keys and deny reasons stay in `error_events.internal_detail` for server tracing.
+- FirmOS bootstrap writes `audit_events` (tenant-scoped, same transaction as firm creation). Monthly `audit_logs` is unchanged and remains the existing `listAudit` source.
 - Financial mutations use transactions and preserve audit information.
 
 ## V1 Resource Authorization
