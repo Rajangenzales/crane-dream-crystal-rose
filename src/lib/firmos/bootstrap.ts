@@ -1,11 +1,75 @@
-import type { AuthorizationContext } from "./domain";
+import {
+  FIRMOS_PERMISSIONS,
+  type AuthorizationContext,
+  type FirmOSPermission,
+  type RoleId,
+} from "./domain.ts";
 
-export const DEFAULT_FIRM_ROLES = [
-  { name: "Owner", description: "Full control of the firm and its configuration.", permissions: ["firm.view", "firm.manage", "members.view", "members.manage", "roles.view", "roles.manage", "clients.view", "clients.manage", "services.view", "services.manage", "work.view", "work.manage", "work.assign", "finance.view", "finance.manage", "finance.correct", "reports.view", "reports.generate", "reports.export", "backup.manage", "audit.view"] },
-  { name: "Manager", description: "Operational management without firm ownership controls.", permissions: ["firm.view", "members.view", "clients.view", "clients.manage", "services.view", "services.manage", "work.view", "work.manage", "work.assign", "finance.view", "finance.manage", "reports.view", "reports.generate", "reports.export"] },
-  { name: "Member", description: "Standard team access to permitted operational work.", permissions: ["firm.view", "clients.view", "services.view", "work.view"] },
-  { name: "Viewer", description: "Read-only access to permitted operational information.", permissions: ["firm.view", "clients.view", "services.view", "work.view", "reports.view"] },
-] as const;
+const MANAGER_PERMISSIONS = [
+  "firm.view",
+  "users.view",
+  "clients.view",
+  "clients.create",
+  "clients.edit",
+  "clients.archive",
+  "services.view",
+  "services.create",
+  "services.edit",
+  "work.view",
+  "work.create",
+  "work.update",
+  "work.assign",
+  "work.review",
+  "work.complete",
+  "finance.view",
+  "invoices.create",
+  "payments.create",
+  "reports.view",
+  "reports.generate",
+  "reports.export",
+] as const satisfies readonly FirmOSPermission[];
+
+const MEMBER_PERMISSIONS = [
+  "firm.view",
+  "clients.view",
+  "services.view",
+  "work.view",
+] as const satisfies readonly FirmOSPermission[];
+
+const VIEWER_PERMISSIONS = [
+  "firm.view",
+  "clients.view",
+  "services.view",
+  "work.view",
+  "reports.view",
+] as const satisfies readonly FirmOSPermission[];
+
+export const DEFAULT_FIRM_ROLES: readonly {
+  name: "Owner" | "Manager" | "Member" | "Viewer";
+  description: string;
+  permissions: readonly FirmOSPermission[];
+}[] = [
+  {
+    name: "Owner",
+    description: "Full control of the firm and its configuration.",
+    permissions: FIRMOS_PERMISSIONS,
+  },
+  {
+    name: "Manager",
+    description: "Operational management without firm ownership controls.",
+    permissions: MANAGER_PERMISSIONS,
+  },
+  {
+    name: "Member",
+    description: "Standard team access to permitted operational work.",
+    permissions: MEMBER_PERMISSIONS,
+  },
+  {
+    name: "Viewer",
+    description: "Read-only access to permitted operational information.",
+    permissions: VIEWER_PERMISSIONS,
+  },
+];
 
 export interface FirmBootstrapInput {
   firmName: string;
@@ -13,7 +77,6 @@ export interface FirmBootstrapInput {
   slug: string;
   timezone?: string;
   currencyCode?: string;
-  ownerUserId: string;
   ownerDisplayName?: string;
 }
 
@@ -26,20 +89,33 @@ export interface FirmBootstrapResult {
 export function validateFirmBootstrapInput(input: FirmBootstrapInput): void {
   if (!input.firmName.trim()) throw new Error("Firm name is required");
   if (!input.slug.trim()) throw new Error("Firm slug is required");
-  if (!input.ownerUserId.trim()) throw new Error("Owner user is required");
 }
 
+/** Owner identity is always the authenticated user, never a client-supplied id. */
+export function bootstrapOwnerUserId(authenticatedUserId: string): string {
+  const userId = authenticatedUserId.trim();
+  if (!userId) throw new Error("Owner user is required");
+  return userId;
+}
+
+/**
+ * Test/helper snapshot of the Owner grant set. Not a membership resolver.
+ * Live authorization must use `resolveAuthorization`.
+ */
 export function ownerAuthorizationContext(
   firmId: string,
   userId: string,
   membershipId: string,
-  roleId: string,
+  roleId: RoleId,
 ): AuthorizationContext {
   return {
     firmId,
     userId,
     membershipId,
+    membershipStatus: "active",
+    firmIsActive: true,
     roleIds: [roleId],
-    permissionKeys: DEFAULT_FIRM_ROLES[0].permissions,
+    permissions: new Set<FirmOSPermission>(DEFAULT_FIRM_ROLES[0].permissions),
+    scope: { kind: "firm" },
   };
 }

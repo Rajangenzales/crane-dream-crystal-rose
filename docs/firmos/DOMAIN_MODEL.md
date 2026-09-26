@@ -26,8 +26,8 @@ User
 - Firm: tenant boundary and firm-level configuration.
 - User: authenticated human identity.
 - Membership: relationship between a user and a firm.
-- Role: named collection of permissions.
-- Permission: atomic capability such as CLIENT_EDIT or PAYMENT_CREATE.
+- Role: named, firm-scoped collection of permissions.
+- Permission: atomic capability stored as a global key such as `clients.edit` or `payments.create` (spec names: CLIENT_EDIT, PAYMENT_CREATE). Permission keys are a global catalog; firms compose them into roles and do not copy permission rows per tenant.
 - Client: customer/business managed by a firm.
 - Contact: person associated with a client.
 - Service: tenant-defined service catalogue item.
@@ -45,8 +45,10 @@ User
 - Error Event: sanitized application diagnostic linked to an internal reference ID.
 
 ## Rules
-- Tenant-owned entities must be tenant-scoped through a controlled relationship.
-- Tenant identifiers are not authorization mechanisms; authorization is enforced server-side.
+- Tenant-owned entities must be tenant-scoped through a controlled relationship. Resource authorization uses the stored `firm_id` on the resource, compared to the membership-resolved context firm.
+- Tenant identifiers are not authorization mechanisms; authorization is enforced server-side via `authorize(context, permission, resource)`.
+- Assigned-work scope is represented at the authorization contract. It applies when work resources carry assignee membership ids. Do not treat Member `work.view` as assignment-limited until work tables exist and Member contexts are given `assigned_work`.
+- Client scope is represented at the authorization contract and is evaluated against server-resolved `clientId` values. It is not assigned until a client resource model exists.
 - Work status is separate from finance status.
 - Financial corrections require permission and an audit trail.
 - AI-extracted financial data remains candidate data until a human-authorized workflow confirms it.
