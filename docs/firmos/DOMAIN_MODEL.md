@@ -41,8 +41,8 @@ User
 - Payment Allocation: relationship between payment and invoice balance.
 - Document: uploaded file or extracted business document.
 - Report: generated business output subject to permission.
-- Audit Event: trace of security-sensitive or business-significant actions.
-- Error Event: sanitized application diagnostic linked to an internal reference ID.
+- Audit Event: tenant-scoped trace of security-sensitive or business-significant FirmOS actions (`audit_events`). Each event carries `firm_id` and a `reference_id`. Monthly `audit_logs` remains a separate legacy listing store.
+- Error Event: sanitized application diagnostic linked to an internal reference ID (`error_events`). Client-visible authorization failures expose only the public message and `referenceId`.
 
 ## Rules
 - Tenant-owned entities must be tenant-scoped through a controlled relationship. Resource authorization uses the stored `firm_id` on the resource, compared to the membership-resolved context firm.
