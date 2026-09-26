@@ -10,4 +10,10 @@ This directory contains the current product and engineering specifications for F
 6. [UX / Screen Specification](./UX_SCREEN_SPECIFICATION.md)
 7. [Migration & Implementation Plan](./MIGRATION_IMPLEMENTATION_PLAN.md)
 
+Audits and follow-on engineering plans (not product specs):
+
+- [Application & Domain Audit](./APPLICATION_DOMAIN_AUDIT.md)
+- [Authorization Foundation Audit](./AUTHORIZATION_FOUNDATION_AUDIT.md)
+- [Authorization Foundation Implementation Plan](./AUTHORIZATION_FOUNDATION_IMPLEMENTATION_PLAN.md)
+
 These documents describe intended FirmOS behavior. When the current code differs, migration work must be explicit rather than silently changing the specification or guessing the intended behavior.
