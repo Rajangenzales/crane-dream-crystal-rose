@@ -50,6 +50,13 @@ User identity is Better Auth `"user"`. `firm_memberships.user_id` is `text` with
 
 Deleting a firm cascades its roles, memberships, and `membership_roles` rows. The global `permissions` catalog is not tenant-owned and is not deleted.
 
+## FirmOS Audit Rule
+`audit_events` is the FirmOS authorization/audit table. Rows are tenant-scoped by `firm_id` (from the server-resolved firm in the same transaction) and carry a `reference_id` for tracing. Queries must filter `firm_id = context.firmId`. There is no cross-tenant listing helper.
+
+`error_events` stores sanitized authorization failures keyed by `reference_id`. `internal_detail` is for server-side tracing and is never returned to the client.
+
+Monthly `audit_logs` is unchanged. It is not replaced by `audit_events` and is still the source for existing `listAudit` behavior.
+
 ## Financial Rule
 Payments and allocations are separate from work completion. Corrections must preserve an auditable history rather than silently rewriting financial history.
 
