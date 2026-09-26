@@ -71,5 +71,36 @@ only. Permission **keys** are a global catalog; firms compose them into roles.
 - Errors returned to users are sanitized and receive a reference ID where appropriate.
 - Financial mutations use transactions and preserve audit information.
 
+## V1 Resource Authorization
+
+Protected actions use the server-side contract:
+
+```text
+authorize(context, permission, resource)
+```
+
+`context` is the membership-resolved `AuthorizationContext`. `permission` is a canonical stored key from the catalog above. `resource` is a server-resolved `ProtectedResource` whose `firmId` comes from stored tenant rows, never from untrusted client scope data.
+
+Authorization fails closed. Unknown permission keys, missing permission grants, inactive membership, inactive firm, and missing `resource.firmId` are denials.
+
+### V1 scope matrix
+
+Scope is computed on the server from membership and resource fields. There is no `scopes` table in V1. A client-supplied scope is never proof of authorization.
+
+Resolved contexts default to `{ kind: "firm" }`. `assigned_work` and `client` are valid `authorize()` inputs so later work/client modules reuse this contract. They are not assigned to Member roles until the underlying resource model exists.
+
+| Context `scope.kind` | Resource | Rule |
+|---|---|---|
+| `firm` | any | allow iff `resource.firmId === context.firmId` and the canonical permission is present |
+| `assigned_work` | `type === "work"` | allow iff tenant match **and** `context.membershipId` is in `assigneeMembershipIds` |
+| `assigned_work` | `type === "firm"` | allow iff tenant match **and** permission is `firm.view` |
+| `assigned_work` | any other type | deny (`scope_mismatch`) |
+| `client` | resource with `clientId` | allow iff tenant match **and** `resource.clientId` is in `context.scope.clientIds` |
+| any | missing `resource.firmId` | deny (`tenant_mismatch`) |
+
+`assigned_work` may not use `users.*`, finance, or backup against firm resources. Firm-governance access under `assigned_work` is `firm.view` only.
+
+Permission present plus a different `resource.firmId` is always `tenant_mismatch`. Scope cannot override resource firm identity.
+
 ## Default Governance
 The firm Admin role receives broad firm-management permissions by default. Additional roles receive only explicitly granted capabilities. Developer/IT permissions are separate from normal firm administration.

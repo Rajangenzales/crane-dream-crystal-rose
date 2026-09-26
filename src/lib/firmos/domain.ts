@@ -166,3 +166,115 @@ export function requirePermission(
     throw new Error("Permission denied");
   }
 }
+
+export type FirmOSResourceType =
+  | "firm"
+  | "membership"
+  | "role"
+  | "client"
+  | "service"
+  | "work"
+  | "invoice"
+  | "payment"
+  | "report"
+  | "audit_event"
+  | "backup";
+
+/**
+ * Server-resolved resource identity used by authorize().
+ * firmId must come from stored rows, never from untrusted client scope data.
+ */
+export interface ProtectedResource {
+  type: FirmOSResourceType;
+  firmId: FirmId;
+  id?: string;
+  /** When type === "work", membership ids that may access assigned_work scope. */
+  assigneeMembershipIds?: readonly MembershipId[];
+  clientId?: string;
+}
+
+export type AuthorizeDeniedReason =
+  | "permission_missing"
+  | "tenant_mismatch"
+  | "scope_mismatch"
+  | "inactive_context";
+
+export type AuthorizeResult =
+  | { ok: true }
+  | { ok: false; reason: AuthorizeDeniedReason };
+
+const ASSIGNED_WORK_FIRM_GOVERNANCE = new Set<FirmOSPermission>(["firm.view"]);
+
+function denyAuthorize(reason: AuthorizeDeniedReason): AuthorizeResult {
+  return { ok: false, reason };
+}
+
+function sameFirmId(left: string, right: string): boolean {
+  return left.trim() === right.trim() && left.trim().length > 0;
+}
+
+function isActiveAuthorizationContext(context: AuthorizationContext): boolean {
+  return (
+    context.membershipStatus === "active" &&
+    context.firmIsActive === true &&
+    context.permissions instanceof Set
+  );
+}
+
+/**
+ * V1 resource authorization: tenant match, canonical permission, then scope.
+ * Context must be membership-resolved on the server. Do not deserialize
+ * AuthorizationContext from the client. Do not treat context.scope as a source
+ * of resource.firmId.
+ */
+export function authorize(
+  context: AuthorizationContext,
+  permission: string,
+  resource: ProtectedResource,
+): AuthorizeResult {
+  if (!isActiveAuthorizationContext(context)) {
+    return denyAuthorize("inactive_context");
+  }
+  if (!isFirmOSPermission(permission)) {
+    return denyAuthorize("permission_missing");
+  }
+  if (!hasPermission(context, permission)) {
+    return denyAuthorize("permission_missing");
+  }
+
+  const resourceFirmId = resource.firmId?.trim() ?? "";
+  const contextFirmId = context.firmId?.trim() ?? "";
+  if (!resourceFirmId || !sameFirmId(resourceFirmId, contextFirmId)) {
+    return denyAuthorize("tenant_mismatch");
+  }
+
+  const scopeKind = context.scope?.kind;
+  if (scopeKind === "firm") {
+    return { ok: true };
+  }
+
+  if (scopeKind === "assigned_work") {
+    if (resource.type === "work") {
+      const assignees = resource.assigneeMembershipIds ?? [];
+      if (assignees.includes(context.membershipId)) {
+        return { ok: true };
+      }
+      return denyAuthorize("scope_mismatch");
+    }
+    if (resource.type === "firm" && ASSIGNED_WORK_FIRM_GOVERNANCE.has(permission)) {
+      return { ok: true };
+    }
+    return denyAuthorize("scope_mismatch");
+  }
+
+  if (scopeKind === "client") {
+    const allowed = context.scope.clientIds ?? [];
+    const clientId = resource.clientId?.trim() ?? "";
+    if (clientId && allowed.includes(clientId)) {
+      return { ok: true };
+    }
+    return denyAuthorize("scope_mismatch");
+  }
+
+  return denyAuthorize("scope_mismatch");
+}

@@ -37,6 +37,9 @@
 ## Tenant Rule
 Tenant identity is part of the data model, but raw tenant IDs must never be treated as proof of authorization. Server-side membership and permission checks are mandatory.
 
+## V1 Scope Rule
+There is **no `scopes` table in V1**. Scope is computed from membership plus resource fields (`firm_id`, work assignees, client id) inside `authorize()`. Do not persist a client-supplied scope. Do not create `work_items` or `work_assignments` until that resource model is implemented.
+
 ## Permission Catalog Rule
 `permissions.key` values are a global vocabulary shared by every firm. `roles` are tenant-scoped. Firms grant catalog keys through `role_permissions`; they must not insert per-firm copies of the same capability.
 
