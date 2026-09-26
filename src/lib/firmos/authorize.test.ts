@@ -89,7 +89,7 @@ test("inactive membership context is denied", () => {
   const context = {
     ...serverContext({}),
     membershipStatus: "suspended",
-  } as AuthorizationContext;
+  } as unknown as AuthorizationContext;
   const result = authorize(context, "clients.view", resource("client", FIRM_A));
   assert.deepEqual(result, { ok: false, reason: "inactive_context" });
 });
@@ -98,7 +98,7 @@ test("inactive firm context is denied", () => {
   const context = {
     ...serverContext({}),
     firmIsActive: false,
-  } as AuthorizationContext;
+  } as unknown as AuthorizationContext;
   const result = authorize(context, "clients.view", resource("client", FIRM_A));
   assert.deepEqual(result, { ok: false, reason: "inactive_context" });
 });
