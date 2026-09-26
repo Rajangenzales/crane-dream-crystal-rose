@@ -16,7 +16,7 @@
     "preview:stop": "node scripts/preview.mjs stop",
     "typecheck": "tsc --noEmit",
     "check:auth": "node scripts/check-auth-invariant.mjs",
-    "test": "node --test 'scripts/**/*.test.mjs' && node --experimental-strip-types --test src/lib/app-data/app-data.test.ts src/lib/app-data/readiness-schedule.test.ts src/lib/auth/gate-identity.test.ts src/lib/auth/sign-in-gate.test.ts src/lib/backup.test.ts src/lib/backup.restore.test.ts src/lib/validation.test.ts src/lib/security-headers.test.ts src/lib/provision.test.ts src/lib/firmos/permissions.test.ts src/lib/firmos/resolve-authorization.test.ts src/lib/firmos/membership-integrity.test.ts",
+    "test": "node --test 'scripts/**/*.test.mjs' && node --experimental-strip-types --test src/lib/app-data/app-data.test.ts src/lib/app-data/readiness-schedule.test.ts src/lib/auth/gate-identity.test.ts src/lib/auth/sign-in-gate.test.ts src/lib/backup.test.ts src/lib/backup.restore.test.ts src/lib/validation.test.ts src/lib/security-headers.test.ts src/lib/provision.test.ts src/lib/firmos/permissions.test.ts src/lib/firmos/resolve-authorization.test.ts src/lib/firmos/membership-integrity.test.ts src/lib/firmos/authorize.test.ts",
     "lint": "eslint .",
     "format": "prettier --write ."
   },
