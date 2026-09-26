@@ -5,11 +5,12 @@ import { test } from "node:test";
 import { createTestSql } from "../db-test-utils.ts";
 import { newId } from "../utils.ts";
 import {
+  ADMIN_PERMISSIONS,
   DEFAULT_FIRM_ROLES,
   bootstrapOwnerUserId,
   validateFirmBootstrapInput,
 } from "./bootstrap.ts";
-import { FIRMOS_PERMISSIONS, hasPermission, type FirmOSPermission } from "./domain.ts";
+import { hasPermission, type FirmOSPermission } from "./domain.ts";
 import { resolveAuthorization } from "./resolve-authorization.ts";
 
 async function createFirmosSql() {
@@ -35,7 +36,7 @@ async function seedFirm(
     slug: string;
     status?: "invited" | "active" | "suspended" | "removed";
     firmActive?: boolean;
-    assignedRole?: "Owner" | "Manager" | "Member" | "Viewer" | null;
+    assignedRole?: "Admin" | "Manager" | "Member" | "Viewer" | null;
     roleActive?: boolean;
   },
 ) {
@@ -100,7 +101,7 @@ async function seedFirm(
 test("guessed firmId does not authorize", async () => {
   const { sql } = await createFirmosSql();
   await insertUser(sql, "user-a");
-  await seedFirm(sql, { userId: "user-a", slug: "acme", assignedRole: "Owner" });
+  await seedFirm(sql, { userId: "user-a", slug: "acme", assignedRole: "Admin" });
   const guessed = newId();
   const result = await resolveAuthorization(sql, { userId: "user-a", firmId: guessed });
   assert.equal(result.ok, false);
@@ -124,7 +125,7 @@ test("existing firm without membership is membership_not_found", async () => {
   const seeded = await seedFirm(sql, {
     userId: "user-a",
     slug: "acme",
-    assignedRole: "Owner",
+    assignedRole: "Admin",
   });
   const result = await resolveAuthorization(sql, {
     userId: "user-b",
@@ -142,7 +143,7 @@ test("invited, suspended, and removed memberships do not resolve", async () => {
       userId: "user-a",
       slug: `firm-${status}`,
       status,
-      assignedRole: "Owner",
+      assignedRole: "Admin",
     });
     const result = await resolveAuthorization(sql, {
       userId: "user-a",
@@ -159,7 +160,7 @@ test("inactive firm denies even with an active membership", async () => {
   const seeded = await seedFirm(sql, {
     userId: "user-a",
     slug: "dormant",
-    assignedRole: "Owner",
+    assignedRole: "Admin",
     firmActive: false,
   });
   const result = await resolveAuthorization(sql, {
@@ -203,13 +204,13 @@ test("only inactive roles count as no_roles", async () => {
   if (!result.ok) assert.equal(result.reason, "no_roles");
 });
 
-test("active Owner membership resolves permissions from the database", async () => {
+test("active Admin membership resolves permissions from the database", async () => {
   const { sql } = await createFirmosSql();
   await insertUser(sql, "user-a");
   const seeded = await seedFirm(sql, {
     userId: "user-a",
     slug: "owned",
-    assignedRole: "Owner",
+    assignedRole: "Admin",
   });
   const result = await resolveAuthorization(sql, {
     userId: "user-a",
@@ -223,14 +224,16 @@ test("active Owner membership resolves permissions from the database", async () 
   assert.equal(result.context.membershipStatus, "active");
   assert.equal(result.context.firmIsActive, true);
   assert.equal(result.context.scope.kind, "firm");
-  assert.deepEqual([...result.context.roleIds], [seeded.roleIds.get("Owner")]);
+  assert.deepEqual([...result.context.roleIds], [seeded.roleIds.get("Admin")]);
   assert.deepEqual(
     [...result.context.permissions].sort(),
-    [...FIRMOS_PERMISSIONS].sort(),
+    [...ADMIN_PERMISSIONS].sort(),
   );
+  assert.equal(hasPermission(result.context, "backup.restore"), false);
+  assert.equal(hasPermission(result.context, "firm.manage"), true);
 });
 
-test("permissions come from assigned roles, not the Owner catalog shortcut", async () => {
+test("permissions come from assigned roles, not the Admin catalog shortcut", async () => {
   const { sql } = await createFirmosSql();
   await insertUser(sql, "user-a");
   const seeded = await seedFirm(sql, {
@@ -264,7 +267,7 @@ test("omitted firmId succeeds only for exactly one active membership", async () 
   const first = await seedFirm(sql, {
     userId: "user-a",
     slug: "one",
-    assignedRole: "Owner",
+    assignedRole: "Admin",
   });
   const sole = await resolveAuthorization(sql, { userId: "user-a" });
   assert.equal(sole.ok, true);
@@ -308,9 +311,9 @@ test("bootstrap owner is the authenticated user, never client input", () => {
 
 test("duplicate firm slug is rejected by the unique constraint", async () => {
   const { sql } = await createFirmosSql();
-  await seedFirm(sql, { userId: "user-a", slug: "taken", assignedRole: "Owner" });
+  await seedFirm(sql, { userId: "user-a", slug: "taken", assignedRole: "Admin" });
   await assert.rejects(
-    () => seedFirm(sql, { userId: "user-b", slug: "taken", assignedRole: "Owner" }),
+    () => seedFirm(sql, { userId: "user-b", slug: "taken", assignedRole: "Admin" }),
     /unique|duplicate/i,
   );
 });

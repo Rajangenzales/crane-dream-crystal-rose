@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { createTestSql } from "../db-test-utils.ts";
 import { newId } from "../utils.ts";
-import { DEFAULT_FIRM_ROLES } from "./bootstrap.ts";
+import { ADMIN_PERMISSIONS, DEFAULT_FIRM_ROLES } from "./bootstrap.ts";
 import { FIRMOS_PERMISSIONS } from "./domain.ts";
 import { resolveAuthorization } from "./resolve-authorization.ts";
 
@@ -65,11 +65,11 @@ test("same-firm membership_roles insert succeeds without supplying firm_id", asy
     insert into firm_memberships (id, firm_id, user_id, status, joined_at)
     values (${membershipId}, ${firmId}, ${"user-a"}, 'active', now())
   `;
-  const ownerRoleId = roleIds.get("Owner");
-  assert.ok(ownerRoleId);
+  const adminRoleId = roleIds.get("Admin");
+  assert.ok(adminRoleId);
   await sql`
     insert into membership_roles (membership_id, role_id)
-    values (${membershipId}, ${ownerRoleId})
+    values (${membershipId}, ${adminRoleId})
   `;
   const rows = await sql<{ firm_id: string }>`
     select firm_id from membership_roles where membership_id = ${membershipId}
@@ -83,12 +83,13 @@ test("same-firm membership_roles insert succeeds without supplying firm_id", asy
   assert.equal(resolved.ok, true);
   if (resolved.ok) {
     assert.equal(resolved.context.membershipId, membershipId);
-    assert.equal(hasAllOwnerKeys(resolved.context.permissions), true);
+    assert.equal(hasAllAdminKeys(resolved.context.permissions), true);
+    assert.equal(resolved.context.permissions.has("backup.restore"), false);
   }
 });
 
-function hasAllOwnerKeys(permissions: ReadonlySet<string>): boolean {
-  return FIRMOS_PERMISSIONS.every((key) => permissions.has(key));
+function hasAllAdminKeys(permissions: ReadonlySet<string>): boolean {
+  return ADMIN_PERMISSIONS.every((key) => permissions.has(key));
 }
 
 test("cross-firm membership_roles insert fails at the database layer", async () => {
@@ -100,7 +101,7 @@ test("cross-firm membership_roles insert fails at the database layer", async () 
     insert into firm_memberships (id, firm_id, user_id, status, joined_at)
     values (${membershipId}, ${firmA.firmId}, ${"user-a"}, 'active', now())
   `;
-  const foreignRoleId = firmB.roleIds.get("Owner");
+  const foreignRoleId = firmB.roleIds.get("Admin");
   assert.ok(foreignRoleId);
   await assert.rejects(
     () =>
@@ -116,7 +117,7 @@ test("cross-firm membership_roles insert fails at the database layer", async () 
   assert.equal(rows[0]?.n, "0");
 });
 
-test("bootstrap-style Owner assignment remains valid", async () => {
+test("bootstrap-style Admin assignment remains valid", async () => {
   const { sql } = await createIntegritySql();
   const { firmId, roleIds } = await seedFirmWithRoles(sql, "boot");
   const membershipId = newId();
@@ -126,7 +127,7 @@ test("bootstrap-style Owner assignment remains valid", async () => {
   `;
   await sql`
     insert into membership_roles (membership_id, role_id)
-    values (${membershipId}, ${roleIds.get("Owner")})
+    values (${membershipId}, ${roleIds.get("Admin")})
   `;
   const unique = await sql<{ n: string }>`
     select count(*)::text as n from firm_memberships where firm_id = ${firmId} and user_id = ${"owner-user"}
@@ -153,7 +154,7 @@ test("deleting a firm cascades roles but keeps the global permission catalog", a
   `;
   await sql`
     insert into membership_roles (membership_id, role_id)
-    values (${membershipId}, ${b.roleIds.get("Owner")})
+    values (${membershipId}, ${b.roleIds.get("Admin")})
   `;
 
   const before = await sql<{ n: string }>`select count(*)::text as n from permissions`;
@@ -173,24 +174,24 @@ test("deleting a firm cascades roles but keeps the global permission catalog", a
   assert.equal(droppedLinks[0]?.n, "0");
 
   const kept = await sql<{ name: string }>`
-    select name from roles where firm_id = ${a.firmId} and name = 'Owner'
+    select name from roles where firm_id = ${a.firmId} and name = 'Admin'
   `;
-  assert.equal(kept[0]?.name, "Owner");
+  assert.equal(kept[0]?.name, "Admin");
 });
 
-test("two firms may both have an Owner role", async () => {
+test("two firms may both have an Admin role", async () => {
   const { sql } = await createIntegritySql();
   const a = await seedFirmWithRoles(sql, "one");
   const b = await seedFirmWithRoles(sql, "two");
   const namesA = await sql<{ name: string }>`
-    select name from roles where firm_id = ${a.firmId} and name = 'Owner'
+    select name from roles where firm_id = ${a.firmId} and name = 'Admin'
   `;
   const namesB = await sql<{ name: string }>`
-    select name from roles where firm_id = ${b.firmId} and name = 'Owner'
+    select name from roles where firm_id = ${b.firmId} and name = 'Admin'
   `;
   assert.equal(namesA.length, 1);
   assert.equal(namesB.length, 1);
-  assert.notEqual(a.roleIds.get("Owner"), b.roleIds.get("Owner"));
+  assert.notEqual(a.roleIds.get("Admin"), b.roleIds.get("Admin"));
 });
 
 test("0004_firmos_membership_integrity.sql is idempotent", async () => {

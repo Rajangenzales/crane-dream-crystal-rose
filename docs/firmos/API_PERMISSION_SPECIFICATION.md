@@ -103,5 +103,41 @@ Resolved contexts default to `{ kind: "firm" }`. `assigned_work` and `client` ar
 
 Permission present plus a different `resource.firmId` is always `tenant_mismatch`. Scope cannot override resource firm identity.
 
+## Authorization planes
+
+FirmOS has three explicit authorization domains. They are not a single role hierarchy and must not be collapsed into a `superadmin`.
+
+```text
+Tenant (membership)  ≠  Platform authority  ≠  Technical authority
+```
+
+| Domain | Catalog | Default principal | How it is resolved in V1 |
+|---|---|---|---|
+| Tenant | `FIRMOS_PERMISSIONS` | Firm Admin / Manager / Member / Viewer | `resolveAuthorization` → `authorize` |
+| Platform | `FIRMOS_PLATFORM_PERMISSIONS` (`platform.*`) | Platform Admin | `authorizePlatform` on a server-built `PlatformAuthorizationContext` |
+| Technical | `FIRMOS_TECHNICAL_PERMISSIONS` (`diagnostics.view`, `error_events.view`) | Developer / IT | `authorizeTechnical` on a server-built `TechnicalAuthorizationContext` |
+
+Platform and Technical snapshots are server-constructed. They are never deserialized from the client. They are never derived from a Firm membership. Persistent Platform/Technical principal storage is deferred.
+
+Tenant `authorize()` rejects platform and technical keys (`permission_missing`). Platform authorization rejects technical and tenant business keys. Technical authorization rejects platform and tenant business keys.
+
+### Platform catalog
+- `platform.tenant.view`
+- `platform.tenant.suspend`
+- `platform.system.view`
+- `platform.error.view`
+- `platform.error.manage`
+- `platform.integration.manage`
+- `platform.ai.manage`
+- `platform.health.view`
+
+### Technical catalog
+- `diagnostics.view`
+- `error_events.view`
+
 ## Default Governance
-The firm Admin role receives broad firm-management permissions by default. Additional roles receive only explicitly granted capabilities. Developer/IT permissions are separate from normal firm administration.
+The firm **Admin** role is the tenant administrator for that Firm. It is not a FirmOS Platform Administrator and not Developer/IT.
+
+Admin receives all **tenant** catalog keys except `backup.restore`. Admin does not receive Platform or Technical keys.
+
+Manager, Member, and Viewer receive only their explicit tenant grants. Developer/IT is not a bootstrap Firm role. Platform Admin is not a Firm membership.
