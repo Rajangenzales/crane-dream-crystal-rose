@@ -41,7 +41,12 @@ Tenant identity is part of the data model, but raw tenant IDs must never be trea
 There is **no `scopes` table in V1**. Scope is computed from membership plus resource fields (`firm_id`, work assignees, client id) inside `authorize()`. Do not persist a client-supplied scope. Do not create `work_items` or `work_assignments` until that resource model is implemented.
 
 ## Permission Catalog Rule
-`permissions.key` values are a global vocabulary shared by every firm. `roles` are tenant-scoped. Firms grant catalog keys through `role_permissions`; they must not insert per-firm copies of the same capability.
+`permissions.key` values are a global vocabulary. Tenant, Platform, and Technical keys may coexist as catalog rows. `roles` are tenant-scoped. Firm bootstrap grants only tenant keys, never `platform.*`, `diagnostics.view`, or `error_events.view`. Firms must not treat Platform/Technical catalog rows as membership authority.
+
+## Authorization Plane Persistence Gap
+Phase 6 does **not** introduce `platform_admins`, `technical_admins`, or operator membership tables. Platform and Technical authority are represented as server-side catalogs and context types (`PlatformAuthorizationContext`, `TechnicalAuthorizationContext`). Persistent operator identity and resolvers are deferred by the Phase 6 architecture specification. Do not invent a Firm membership in every tenant as a substitute.
+
+New firms receive the system role named `Admin`. Existing `Owner` system role rows, if any, are equivalent tenant administrators until an explicit follow-up backfill. This phase does not rewrite historical role names.
 
 ## Membership Integrity Rule
 `firm_memberships` is the FirmOS membership table. `membership_roles` is constrained so `firm_memberships.firm_id` equals `roles.firm_id` (trigger stamps `membership_roles.firm_id` from the membership; composite foreign keys enforce both parents). Application code is not the only line of defense.

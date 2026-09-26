@@ -3,6 +3,7 @@ import { newId } from "../utils.ts";
 import { recordAuditEvent } from "./audit.ts";
 import {
   DEFAULT_FIRM_ROLES,
+  FIRMOS_SYSTEM_ROLE_ADMIN,
   type FirmBootstrapInput,
   type FirmBootstrapResult,
 } from "./bootstrap.ts";
@@ -61,11 +62,11 @@ export async function insertFirmBootstrapRecords(
     values (${ownerMembershipId}, ${firmId}, ${ownerUserId}, 'active', ${input.ownerDisplayName ?? null}, now())
   `;
 
-  const ownerRoleId = roleIds.get("Owner");
-  if (!ownerRoleId) throw new Error("Owner role was not created.");
+  const adminRoleId = roleIds.get(FIRMOS_SYSTEM_ROLE_ADMIN);
+  if (!adminRoleId) throw new Error("Admin role was not created.");
   await sql`
     insert into membership_roles (membership_id, role_id)
-    values (${ownerMembershipId}, ${ownerRoleId})
+    values (${ownerMembershipId}, ${adminRoleId})
   `;
 
   await recordAuditEvent(sql, {
@@ -78,7 +79,7 @@ export async function insertFirmBootstrapRecords(
     detail: `Firm created: ${input.firmName}`,
   });
 
-  return { firmId, ownerMembershipId, ownerRoleName: "Owner" };
+  return { firmId, ownerMembershipId, ownerRoleName: "Admin" };
 }
 
 export async function executeFirmBootstrap(

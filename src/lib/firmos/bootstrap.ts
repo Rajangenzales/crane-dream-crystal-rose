@@ -44,15 +44,22 @@ const VIEWER_PERMISSIONS = [
   "reports.view",
 ] as const satisfies readonly FirmOSPermission[];
 
+export const FIRMOS_SYSTEM_ROLE_ADMIN = "Admin";
+
+/** Tenant Admin grants: all tenant keys except backup.restore. No platform/technical keys. */
+export const ADMIN_PERMISSIONS: readonly FirmOSPermission[] = FIRMOS_PERMISSIONS.filter(
+  (key) => key !== "backup.restore",
+);
+
 export const DEFAULT_FIRM_ROLES: readonly {
-  name: "Owner" | "Manager" | "Member" | "Viewer";
+  name: "Admin" | "Manager" | "Member" | "Viewer";
   description: string;
   permissions: readonly FirmOSPermission[];
 }[] = [
   {
-    name: "Owner",
-    description: "Full control of the firm and its configuration.",
-    permissions: FIRMOS_PERMISSIONS,
+    name: "Admin",
+    description: "Tenant administrator for this firm. Not a FirmOS Platform Admin.",
+    permissions: ADMIN_PERMISSIONS,
   },
   {
     name: "Manager",
@@ -83,7 +90,7 @@ export interface FirmBootstrapInput {
 export interface FirmBootstrapResult {
   firmId: string;
   ownerMembershipId: string;
-  ownerRoleName: "Owner";
+  ownerRoleName: "Admin";
 }
 
 export function validateFirmBootstrapInput(input: FirmBootstrapInput): void {
@@ -99,10 +106,10 @@ export function bootstrapOwnerUserId(authenticatedUserId: string): string {
 }
 
 /**
- * Test/helper snapshot of the Owner grant set. Not a membership resolver.
+ * Test/helper snapshot of the tenant Admin grant set. Not a membership resolver.
  * Live authorization must use `resolveAuthorization`.
  */
-export function ownerAuthorizationContext(
+export function adminAuthorizationContext(
   firmId: string,
   userId: string,
   membershipId: string,
@@ -115,7 +122,10 @@ export function ownerAuthorizationContext(
     membershipStatus: "active",
     firmIsActive: true,
     roleIds: [roleId],
-    permissions: new Set<FirmOSPermission>(DEFAULT_FIRM_ROLES[0].permissions),
+    permissions: new Set<FirmOSPermission>(ADMIN_PERMISSIONS),
     scope: { kind: "firm" },
   };
 }
+
+/** @deprecated Use adminAuthorizationContext. Same Admin grant snapshot. */
+export const ownerAuthorizationContext = adminAuthorizationContext;

@@ -40,8 +40,8 @@ export interface FirmMembership {
 }
 
 /**
- * Canonical stored permission keys. Action-oriented; not `*.manage` catch-alls.
- * Developer/IT keys are added in a later phase and are not in this list.
+ * Canonical tenant permission keys. Action-oriented; not `*.manage` catch-alls.
+ * Platform and Technical keys are separate catalogs and are not in this list.
  */
 export const FIRMOS_PERMISSIONS = [
   "firm.view",
@@ -119,6 +119,132 @@ export const FIRMOS_SPEC_PERMISSION_MAP = {
 } as const satisfies Record<string, FirmOSPermission>;
 
 export type FirmOSSpecPermissionName = keyof typeof FIRMOS_SPEC_PERMISSION_MAP;
+
+export type FirmOSAuthorizationDomain = "tenant" | "platform" | "technical";
+
+/**
+ * Frozen Platform Operations catalog. Distinct from tenant keys.
+ * Persistent Platform principal storage is deferred (Phase 6 architecture §21).
+ */
+export const FIRMOS_PLATFORM_PERMISSIONS = [
+  "platform.tenant.view",
+  "platform.tenant.suspend",
+  "platform.system.view",
+  "platform.error.view",
+  "platform.error.manage",
+  "platform.integration.manage",
+  "platform.ai.manage",
+  "platform.health.view",
+] as const;
+
+export type FirmOSPlatformPermission = (typeof FIRMOS_PLATFORM_PERMISSIONS)[number];
+
+/**
+ * Frozen Technical Operations catalog. Distinct from tenant and platform keys.
+ * Persistent Technical principal storage is deferred (Phase 6 architecture §21).
+ */
+export const FIRMOS_TECHNICAL_PERMISSIONS = [
+  "diagnostics.view",
+  "error_events.view",
+] as const;
+
+export type FirmOSTechnicalPermission = (typeof FIRMOS_TECHNICAL_PERMISSIONS)[number];
+
+const PLATFORM_PERMISSION_SET: ReadonlySet<string> = new Set(FIRMOS_PLATFORM_PERMISSIONS);
+const TECHNICAL_PERMISSION_SET: ReadonlySet<string> = new Set(FIRMOS_TECHNICAL_PERMISSIONS);
+
+export function isPlatformPermission(value: string): value is FirmOSPlatformPermission {
+  return PLATFORM_PERMISSION_SET.has(value);
+}
+
+export function isTechnicalPermission(value: string): value is FirmOSTechnicalPermission {
+  return TECHNICAL_PERMISSION_SET.has(value);
+}
+
+export function permissionDomain(value: string): FirmOSAuthorizationDomain | null {
+  if (isFirmOSPermission(value)) return "tenant";
+  if (isPlatformPermission(value)) return "platform";
+  if (isTechnicalPermission(value)) return "technical";
+  return null;
+}
+
+/**
+ * Server-constructed Platform authority snapshot. Never deserialize from the
+ * client. Never derive from a Firm membership. Persistent operator identity
+ * resolution is deferred.
+ */
+export interface PlatformAuthorizationContext {
+  domain: "platform";
+  userId: UserId;
+  permissions: ReadonlySet<FirmOSPlatformPermission>;
+}
+
+/**
+ * Server-constructed Technical authority snapshot. Never deserialize from the
+ * client. Never derive from a Firm membership. Persistent operator identity
+ * resolution is deferred.
+ */
+export interface TechnicalAuthorizationContext {
+  domain: "technical";
+  userId: UserId;
+  permissions: ReadonlySet<FirmOSTechnicalPermission>;
+}
+
+/**
+ * Frozen Platform Admin grant set. Test/server helper only: takes userId, not
+ * client-supplied permissions or roles.
+ */
+export function platformAdminAuthority(userId: UserId): PlatformAuthorizationContext {
+  return {
+    domain: "platform",
+    userId,
+    permissions: new Set<FirmOSPlatformPermission>(FIRMOS_PLATFORM_PERMISSIONS),
+  };
+}
+
+/**
+ * Frozen Technical operator grant set. Test/server helper only: takes userId,
+ * not client-supplied permissions or roles.
+ */
+export function technicalOperatorAuthority(userId: UserId): TechnicalAuthorizationContext {
+  return {
+    domain: "technical",
+    userId,
+    permissions: new Set<FirmOSTechnicalPermission>(FIRMOS_TECHNICAL_PERMISSIONS),
+  };
+}
+
+export function authorizePlatform(
+  context: PlatformAuthorizationContext,
+  permission: string,
+): AuthorizeResult {
+  if (context.domain !== "platform" || !(context.permissions instanceof Set)) {
+    return denyAuthorize("inactive_context");
+  }
+  if (!isPlatformPermission(permission)) {
+    return denyAuthorize("permission_missing");
+  }
+  if (!context.permissions.has(permission)) {
+    return denyAuthorize("permission_missing");
+  }
+  return { ok: true };
+}
+
+export function authorizeTechnical(
+  context: TechnicalAuthorizationContext,
+  permission: string,
+): AuthorizeResult {
+  if (context.domain !== "technical" || !(context.permissions instanceof Set)) {
+    return denyAuthorize("inactive_context");
+  }
+  if (!isTechnicalPermission(permission)) {
+    return denyAuthorize("permission_missing");
+  }
+  if (!context.permissions.has(permission)) {
+    return denyAuthorize("permission_missing");
+  }
+  return { ok: true };
+}
 
 export type AuthorizationScopeKind = "firm" | "assigned_work" | "client";
 

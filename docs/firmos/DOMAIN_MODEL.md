@@ -26,8 +26,8 @@ User
 - Firm: tenant boundary and firm-level configuration.
 - User: authenticated human identity.
 - Membership: relationship between a user and a firm.
-- Role: named, firm-scoped collection of permissions.
-- Permission: atomic capability stored as a global key such as `clients.edit` or `payments.create` (spec names: CLIENT_EDIT, PAYMENT_CREATE). Permission keys are a global catalog; firms compose them into roles and do not copy permission rows per tenant.
+- Role: named, firm-scoped collection of **tenant** permissions. Default Firm roles are Admin, Manager, Member, and Viewer. Admin is the tenant administrator, not Platform Admin.
+- Permission: atomic capability. Tenant keys live in `FIRMOS_PERMISSIONS`. Platform keys (`platform.*`) and Technical keys (`diagnostics.view`, `error_events.view`) are separate catalogs and are not granted by Firm bootstrap.
 - Client: customer/business managed by a firm.
 - Contact: person associated with a client.
 - Service: tenant-defined service catalogue item.
@@ -52,3 +52,6 @@ User
 - Work status is separate from finance status.
 - Financial corrections require permission and an audit trail.
 - AI-extracted financial data remains candidate data until a human-authorized workflow confirms it.
+
+## Authorization planes
+Tenant authority is membership-derived. Platform authority and Technical authority are separate planes. A Firm membership must not satisfy a Platform or Technical request. Platform authority must not satisfy Technical authority, and the reverse. Neither operational plane implies customer business-data permissions (`clients.view`, `invoices.create`, `payments.correct`, `reports.generate`). There is no universal superadmin.
