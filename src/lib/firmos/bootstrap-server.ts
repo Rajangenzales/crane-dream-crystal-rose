@@ -1,9 +1,12 @@
 import { createServerFn } from "@tanstack/react-start";
+import { z } from "zod";
 import { authMiddleware } from "@/lib/auth/middleware";
 import { getSql } from "@/lib/db";
 import { newId } from "@/lib/utils";
+import { parseInput } from "@/lib/validation";
 import {
   DEFAULT_FIRM_ROLES,
+  bootstrapOwnerUserId,
   validateFirmBootstrapInput,
   type FirmBootstrapInput,
   type FirmBootstrapResult,
@@ -18,17 +21,27 @@ function slugify(value: string): string {
     .slice(0, 80);
 }
 
+const firmBootstrapInputSchema = z.object({
+  firmName: z.string(),
+  legalName: z.string().optional(),
+  slug: z.string(),
+  timezone: z.string().optional(),
+  currencyCode: z.string().optional(),
+  ownerDisplayName: z.string().optional(),
+});
+
 export const bootstrapFirm = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
-  .handler(async ({ context, data }: { context: { userId: string }; data: FirmBootstrapInput }) => {
-    const input = {
-      ...data,
+  .validator(parseInput(firmBootstrapInputSchema))
+  .handler(async ({ context, data }) => {
+    const ownerUserId = bootstrapOwnerUserId(context.userId);
+    const input: FirmBootstrapInput = {
       firmName: data.firmName.trim(),
       legalName: data.legalName?.trim() || undefined,
       slug: slugify(data.slug),
       timezone: data.timezone?.trim() || "Asia/Kolkata",
       currencyCode: data.currencyCode?.trim().toUpperCase() || "INR",
-      ownerUserId: context.userId,
+      ownerDisplayName: data.ownerDisplayName?.trim() || undefined,
     };
 
     validateFirmBootstrapInput(input);
@@ -70,7 +83,7 @@ export const bootstrapFirm = createServerFn({ method: "POST" })
       const ownerMembershipId = newId();
       await tx`
         insert into firm_memberships (id, firm_id, user_id, status, display_name, joined_at)
-        values (${ownerMembershipId}, ${firmId}, ${context.userId}, 'active', ${input.ownerDisplayName?.trim() || null}, now())
+        values (${ownerMembershipId}, ${firmId}, ${ownerUserId}, 'active', ${input.ownerDisplayName ?? null}, now())
       `;
 
       const ownerRoleId = roleIds.get("Owner");
@@ -82,7 +95,7 @@ export const bootstrapFirm = createServerFn({ method: "POST" })
 
       await tx`
         insert into audit_logs (id, user_id, action, entity_type, entity_id, detail)
-        values (${newId()}, ${context.userId}, 'firm.bootstrap', 'firm', ${firmId}, ${`Firm created: ${input.firmName}`})
+        values (${newId()}, ${ownerUserId}, 'firm.bootstrap', 'firm', ${firmId}, ${`Firm created: ${input.firmName}`})
       `;
 
       return { firmId, ownerMembershipId, ownerRoleName: "Owner" };
