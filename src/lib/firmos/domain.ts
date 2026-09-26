@@ -40,8 +40,8 @@ export interface FirmMembership {
 }
 
 /**
- * Canonical stored permission keys. Action-oriented; not `*.manage` catch-alls.
- * Developer/IT keys are added in a later phase and are not in this list.
+ * Canonical tenant permission keys. Action-oriented; not `*.manage` catch-alls.
+ * Platform and Technical keys are separate catalogs and are not in this list.
  */
 export const FIRMOS_PERMISSIONS = [
   "firm.view",

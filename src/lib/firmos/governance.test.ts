@@ -256,3 +256,99 @@ test("JSON-deserialized tenant context is still denied", () => {
     reason: "inactive_context",
   });
 });
+
+test("membership resolver cannot attach platform or technical keys", async () => {
+  const { sql } = await createGovernanceSql();
+  const result = await executeFirmBootstrap(sql, "creator", {
+    firmName: "Leak",
+    slug: "leak-plane",
+  });
+  const adminRole = await sql<{ id: string }>`
+    select r.id
+    from roles r
+    join membership_roles mr on mr.role_id = r.id
+    where mr.membership_id = ${result.ownerMembershipId}
+    limit 1
+  `;
+  const roleId = adminRole[0]?.id;
+  assert.ok(roleId);
+  for (const key of ["platform.tenant.view", "diagnostics.view"] as const) {
+    const perm = await sql<{ id: string }>`
+      select id from permissions where key = ${key} limit 1
+    `;
+    assert.ok(perm[0]?.id, key);
+    await sql`
+      insert into role_permissions (role_id, permission_id)
+      values (${roleId}, ${perm[0].id})
+    `;
+  }
+
+  const resolved = await resolveAuthorization(sql, {
+    userId: "creator",
+    firmId: result.firmId,
+  });
+  assert.equal(resolved.ok, true);
+  if (!resolved.ok) return;
+  for (const key of [...FIRMOS_PLATFORM_PERMISSIONS, ...FIRMOS_TECHNICAL_PERMISSIONS]) {
+    assert.equal(
+      [...resolved.context.permissions].includes(key as FirmOSPermission),
+      false,
+      key,
+    );
+  }
+  assert.deepEqual(
+    authorize(resolved.context, "platform.tenant.view", {
+      type: "firm",
+      firmId: result.firmId,
+    }),
+    { ok: false, reason: "permission_missing" },
+  );
+  assert.deepEqual(
+    authorize(resolved.context, "diagnostics.view", {
+      type: "firm",
+      firmId: result.firmId,
+    }),
+    { ok: false, reason: "permission_missing" },
+  );
+});
+
+test("client-supplied domain flags cannot elevate authorization", () => {
+  const tenant = adminAuthorizationContext("firm-1", "user-1", "mem-1", "role-1");
+  const forgedTenant = {
+    ...tenant,
+    domain: "platform",
+    isPlatformAdmin: true,
+    technicalRole: "Developer/IT",
+  };
+  assert.deepEqual(
+    authorize(forgedTenant, "platform.tenant.view", { type: "firm", firmId: "firm-1" }),
+    { ok: false, reason: "permission_missing" },
+  );
+  assert.deepEqual(
+    authorize(forgedTenant, "diagnostics.view", { type: "firm", firmId: "firm-1" }),
+    { ok: false, reason: "permission_missing" },
+  );
+
+  const forgedPlatform = {
+    domain: "platform" as const,
+    userId: "attacker",
+    isPlatformAdmin: true,
+    permissions: ["platform.tenant.view", "clients.view"],
+  };
+  assert.deepEqual(
+    authorizePlatform(forgedPlatform as never, "platform.tenant.view"),
+    { ok: false, reason: "inactive_context" },
+  );
+
+  const jsonTechnical = JSON.parse(
+    JSON.stringify({
+      domain: "technical",
+      userId: "attacker",
+      permissions: ["diagnostics.view"],
+    }),
+  );
+  assert.deepEqual(authorizeTechnical(jsonTechnical, "diagnostics.view"), {
+    ok: false,
+    reason: "inactive_context",
+  });
+});
