@@ -65,5 +65,23 @@ Monthly `audit_logs` is unchanged as a write target. `listAudit` requires `audit
 ## Financial Rule
 Payments and allocations are separate from work completion. Corrections must preserve an auditable history rather than silently rewriting financial history.
 
+## Versioned migrations
+
+Schema changes ship as files in `migrations/` (not `migrations/auth/` until that copy is opted in). Appliers (`scripts/migrate.mjs`, PGLite in `src/lib/db.ts`, and `createTestSql()`) use basename `localeCompare` order and record each file once in `_migrations`.
+
+Current chain (Phase 8 numbering audit):
+
+1. `0001_auth.sql`
+2. `0002_firmos_foundation.sql`
+3. `0002_monthly.sql`
+4. `0003_bootstrap.sql`
+5. `0004_firmos_membership_integrity.sql`
+6. `0005_firmos_audit_events.sql`
+7. `0006_firmos_authorization_planes.sql`
+
+**Discrepancy:** two files share prefix `0002`. `0002_firmos_foundation.sql` sorts before `0002_monthly.sql`. It is not renamed to `0004_firmos_foundation.sql` because `0004`–`0006` are already shipped basenames that may already be stored in `_migrations`. Do not rename applied files. Historical `Owner` role rows are not rewritten in this chain.
+
+`migrations/auth/0001_auth.sql` is the Better Auth source copy and is not applied until copied to `migrations/0001_auth.sql`.
+
 ## Future Extensions
 AI extraction, external integrations, cloud storage and additional modules should be additive and should not force redesign of the core identity or tenant model.

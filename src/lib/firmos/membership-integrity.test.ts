@@ -12,8 +12,6 @@ const MIGRATIONS = join(process.cwd(), "migrations");
 
 async function createIntegritySql() {
   const { sql, pg } = await createTestSql();
-  await pg.exec(readFileSync(join(MIGRATIONS, "0002_firmos_foundation.sql"), "utf8"));
-  await pg.exec(readFileSync(join(MIGRATIONS, "0004_firmos_membership_integrity.sql"), "utf8"));
   return { sql, pg };
 }
 

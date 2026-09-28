@@ -16,4 +16,6 @@ Audits and follow-on engineering plans (not product specs):
 - [Authorization Foundation Audit](./AUTHORIZATION_FOUNDATION_AUDIT.md)
 - [Authorization Foundation Implementation Plan](./AUTHORIZATION_FOUNDATION_IMPLEMENTATION_PLAN.md)
 
+Migration filenames and apply order are listed in [Database Specification](./DATABASE_SPECIFICATION.md) (Phase 8 numbering).
+
 These documents describe intended FirmOS behavior. When the current code differs, migration work must be explicit rather than silently changing the specification or guessing the intended behavior.

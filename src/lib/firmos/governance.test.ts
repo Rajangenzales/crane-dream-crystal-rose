@@ -26,14 +26,8 @@ import {
 } from "./domain.ts";
 import { resolveAuthorization } from "./resolve-authorization.ts";
 
-const MIGRATIONS = join(process.cwd(), "migrations");
-
 async function createGovernanceSql() {
   const { sql, pg } = await createTestSql();
-  await pg.exec(readFileSync(join(MIGRATIONS, "0002_firmos_foundation.sql"), "utf8"));
-  await pg.exec(readFileSync(join(MIGRATIONS, "0004_firmos_membership_integrity.sql"), "utf8"));
-  await pg.exec(readFileSync(join(MIGRATIONS, "0005_firmos_audit_events.sql"), "utf8"));
-  await pg.exec(readFileSync(join(MIGRATIONS, "0006_firmos_authorization_planes.sql"), "utf8"));
   return { sql, pg };
 }
 
