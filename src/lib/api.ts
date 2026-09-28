@@ -4,8 +4,23 @@ import { getSql, type Sql } from "@/lib/db";
 import { monthTitle } from "@/lib/catalog";
 import { toNumber } from "@/lib/format";
 import { newId } from "@/lib/utils";
-import { dumpBusiness, restoreBusiness, validateBackupPayload } from "@/lib/backup";
+import { dumpBusiness } from "@/lib/backup";
 import { provisionActor } from "@/lib/provision";
+import {
+  canViewFinance,
+  clientUpdatePermission,
+  redactPaymentRecords,
+  requireFirmOSAction,
+} from "@/lib/firmos/legacy-api-auth";
+import {
+  handleDeletePayment,
+  handleGetDashboard,
+  handleGetWorkspace,
+  handleRestoreBackup,
+  handleSavePayment,
+  handleUpdateUserAccess,
+} from "@/lib/firmos/legacy-api-handlers";
+import { hasPermission, type AuthorizationContext } from "@/lib/firmos/domain";
 import {
   addSectionSchema,
   assignClientServiceSchema,
@@ -94,17 +109,9 @@ async function getActor(sql: Sql, userId: string): Promise<Actor> {
   return actor;
 }
 
-async function requireActive(sql: Sql, userId: string) {
-  const actor = await getActor(sql, userId);
-  if (!actor.isActive) throw new ForbiddenError("Your account is waiting for activation.");
-  return actor;
-}
-
-async function requireAdmin(sql: Sql, userId: string) {
-  const actor = await requireActive(sql, userId);
-  if (actor.role !== "admin") throw new ForbiddenError("Admin access required.");
-  return actor;
-}
+// Phase 7: requireActive/requireAdmin removed. Protected handlers use
+// requireFirmOSAction. Monthly tables remain unscoped by firm_id until a
+// later domain refactor; multi-firm production use is unsupported.
 
 function mapClient(row: {
   id: string;
@@ -544,20 +551,15 @@ async function seedIfEmpty(sql: Sql) {
   }
 }
 
-function canSeePayments(actor: Actor, settings: Settings) {
-  return actor.role === "admin" || settings.viewersSeePayments;
-}
-
-function redactPayments<T extends { payments?: Payment[]; paymentAmount?: number | null; paymentStatus?: string }>(
-  actor: Actor,
-  settings: Settings,
+function redactReportFinance<T extends { payments?: Payment[]; paymentAmount?: number | null }>(
+  authz: AuthorizationContext,
   value: T,
 ): T {
-  if (canSeePayments(actor, settings)) return value;
+  if (canViewFinance(authz)) return value;
   if (value.payments) {
     return {
       ...value,
-      payments: value.payments.map((p) => ({ ...p, amount: null, notes: "" })),
+      payments: redactPaymentRecords(authz, value.payments),
     };
   }
   return { ...value, paymentAmount: null };
@@ -578,7 +580,7 @@ export const updateSettings = createServerFn({ method: "POST" })
   .validator(parseInput(updateSettingsSchema))
   .handler(async ({ context, data }) => {
     const sql = await getSql();
-    const actor = await requireAdmin(sql, context.userId);
+    const actor = await requireFirmOSAction(sql, context.userId, "firm.manage", { type: "firm" });
     const pairs: Array<[string, string]> = [
       ["agency_name", data.agencyName.trim() || "Genzales"],
       ["agency_tagline", data.agencyTagline.trim()],
@@ -598,7 +600,7 @@ export const listClients = createServerFn({ method: "GET" })
   .validator(parseInput(includeInactiveSchema))
   .handler(async ({ context, data }) => {
     const sql = await getSql();
-    await requireActive(sql, context.userId);
+    await requireFirmOSAction(sql, context.userId, "clients.view", { type: "client" });
     const rows = await sql<{
       id: string;
       name: string;
@@ -634,7 +636,7 @@ export const createClient = createServerFn({ method: "POST" })
   .validator(parseInput(createClientSchema))
   .handler(async ({ context, data }) => {
     const sql = await getSql();
-    const actor = await requireAdmin(sql, context.userId);
+    const actor = await requireFirmOSAction(sql, context.userId, "clients.create", { type: "firm" });
     const name = data.name.trim();
     if (!name) throw new Error("Client name is required.");
     const id = newId();
@@ -651,7 +653,12 @@ export const updateClient = createServerFn({ method: "POST" })
   .validator(parseInput(updateClientSchema))
   .handler(async ({ context, data }) => {
     const sql = await getSql();
-    const actor = await requireAdmin(sql, context.userId);
+    const actor = await requireFirmOSAction(
+      sql,
+      context.userId,
+      clientUpdatePermission(data.isActive),
+      { type: "client", id: data.id },
+    );
     const name = data.name.trim();
     if (!name) throw new Error("Client name is required.");
     await sql`update clients set
@@ -674,7 +681,7 @@ export const listServices = createServerFn({ method: "GET" })
   .validator(parseInput(includeInactiveSchema))
   .handler(async ({ context, data }) => {
     const sql = await getSql();
-    await requireActive(sql, context.userId);
+    await requireFirmOSAction(sql, context.userId, "services.view", { type: "firm" });
     const rows = await sql<{
       id: string;
       name: string;
@@ -698,7 +705,7 @@ export const createService = createServerFn({ method: "POST" })
   .validator(parseInput(createServiceSchema))
   .handler(async ({ context, data }) => {
     const sql = await getSql();
-    const actor = await requireAdmin(sql, context.userId);
+    const actor = await requireFirmOSAction(sql, context.userId, "services.create", { type: "firm" });
     const name = data.name.trim();
     if (!name) throw new Error("Service name is required.");
     const dup = await sql<{ id: string }>`select id from service_library where lower(name) = ${name.toLowerCase()}`;
@@ -716,7 +723,10 @@ export const updateService = createServerFn({ method: "POST" })
   .validator(parseInput(updateServiceSchema))
   .handler(async ({ context, data }) => {
     const sql = await getSql();
-    const actor = await requireAdmin(sql, context.userId);
+    const actor = await requireFirmOSAction(sql, context.userId, "services.edit", {
+      type: "service",
+      id: data.id,
+    });
     const name = data.name.trim();
     await sql`update service_library set name = ${name}, is_active = ${data.isActive}, updated_at = now() where id = ${data.id}`;
     await audit(sql, actor.userId, data.isActive ? "service.update" : "service.deactivate", "service", data.id, name);
@@ -728,7 +738,10 @@ export const assignClientService = createServerFn({ method: "POST" })
   .validator(parseInput(assignClientServiceSchema))
   .handler(async ({ context, data }) => {
     const sql = await getSql();
-    const actor = await requireAdmin(sql, context.userId);
+    const actor = await requireFirmOSAction(sql, context.userId, "services.edit", {
+      type: "client",
+      clientId: data.clientId,
+    });
     let serviceId = data.serviceId;
     if (!serviceId) {
       const name = data.customName?.trim();
@@ -754,61 +767,69 @@ export const unassignClientService = createServerFn({ method: "POST" })
   .validator(parseInput(unassignClientServiceSchema))
   .handler(async ({ context, data }) => {
     const sql = await getSql();
-    const actor = await requireAdmin(sql, context.userId);
+    const actor = await requireFirmOSAction(sql, context.userId, "services.edit", {
+      type: "client",
+      clientId: data.clientId,
+    });
     await sql`delete from client_services where client_id = ${data.clientId} and service_id = ${data.serviceId}`;
     await audit(sql, actor.userId, "client_service.remove", "client", data.clientId, data.serviceId);
     return { ok: true };
   });
+
+async function loadWorkspace(
+  sql: Sql,
+  clientId: string,
+  year: number,
+  month: number,
+): Promise<Workspace> {
+  const clients = await sql<Parameters<typeof mapClient>[0]>`select * from clients where id = ${clientId}`;
+  if (!clients[0]) throw new Error("Client not found.");
+  const period = await ensurePeriodInternal(sql, clientId, year, month);
+  const sections = await loadSections(sql, period.id);
+  const assigned = await sql<{ service_id: string }>`select service_id from client_services where client_id = ${clientId}`;
+  const services = await sql<{
+    id: string;
+    name: string;
+    is_active: boolean;
+    is_global: boolean;
+    sort_order: number;
+  }>`select id, name, is_active, is_global, sort_order from service_library order by sort_order, name`;
+  const payments = await sql<{
+    id: string;
+    client_id: string;
+    period_id: string | null;
+    year: number;
+    month: number;
+    status: string;
+    amount: string | number | null;
+    payment_date: string | null;
+    notes: string;
+  }>`select * from payments where client_id = ${clientId} and year = ${year} and month = ${month}
+     order by created_at`;
+  return {
+    client: mapClient(clients[0]),
+    period,
+    services: services.map((s) => ({
+      id: s.id,
+      name: s.name,
+      isActive: s.is_active,
+      isGlobal: s.is_global,
+      sortOrder: s.sort_order,
+    })),
+    assignedServiceIds: assigned.map((a) => a.service_id),
+    sections,
+    payments: payments.map(mapPayment),
+  };
+}
 
 export const getWorkspace = createServerFn({ method: "GET" })
   .middleware([authMiddleware])
   .validator(parseInput(workspaceQuerySchema))
   .handler(async ({ context, data }): Promise<Workspace> => {
     const sql = await getSql();
-    const actor = await requireActive(sql, context.userId);
-    const settings = await getSettingsRow(sql);
-    const clients = await sql<Parameters<typeof mapClient>[0]>`select * from clients where id = ${data.clientId}`;
-    if (!clients[0]) throw new Error("Client not found.");
-    const period = await ensurePeriodInternal(sql, data.clientId, data.year, data.month);
-    const sections = await loadSections(sql, period.id);
-    const assigned = await sql<{ service_id: string }>`select service_id from client_services where client_id = ${data.clientId}`;
-    const services = await sql<{
-      id: string;
-      name: string;
-      is_active: boolean;
-      is_global: boolean;
-      sort_order: number;
-    }>`select id, name, is_active, is_global, sort_order from service_library order by sort_order, name`;
-    const payments = await sql<{
-      id: string;
-      client_id: string;
-      period_id: string | null;
-      year: number;
-      month: number;
-      status: string;
-      amount: string | number | null;
-      payment_date: string | null;
-      notes: string;
-    }>`select * from payments where client_id = ${data.clientId} and year = ${data.year} and month = ${data.month}
-       order by created_at`;
-    const ws: Workspace = {
-      client: mapClient(clients[0]),
-      period,
-      services: services.map((s) => ({
-        id: s.id,
-        name: s.name,
-        isActive: s.is_active,
-        isGlobal: s.is_global,
-        sortOrder: s.sort_order,
-      })),
-      assignedServiceIds: assigned.map((a) => a.service_id),
-      sections,
-      payments: payments.map(mapPayment),
-    };
-    if (!canSeePayments(actor, settings)) {
-      ws.payments = ws.payments.map((p) => ({ ...p, amount: null, notes: "" }));
-    }
-    return ws;
+    return handleGetWorkspace(sql, context.userId, () =>
+      loadWorkspace(sql, data.clientId, data.year, data.month),
+    );
   });
 
 export const addSection = createServerFn({ method: "POST" })
@@ -816,7 +837,7 @@ export const addSection = createServerFn({ method: "POST" })
   .validator(parseInput(addSectionSchema))
   .handler(async ({ context, data }) => {
     const sql = await getSql();
-    const actor = await requireAdmin(sql, context.userId);
+    const actor = await requireFirmOSAction(sql, context.userId, "work.update", { type: "firm" });
     const title = data.title.trim();
     if (!title) throw new Error("Section title is required.");
     const max = await sql<{ m: number | null }>`select max(sort_order) as m from report_sections where period_id = ${data.periodId}`;
@@ -832,7 +853,7 @@ export const updateSection = createServerFn({ method: "POST" })
   .validator(parseInput(updateSectionSchema))
   .handler(async ({ context, data }) => {
     const sql = await getSql();
-    await requireAdmin(sql, context.userId);
+    await requireFirmOSAction(sql, context.userId, "work.update", { type: "firm", id: data.id });
     await sql`update report_sections set title = ${data.title.trim()}, updated_at = now() where id = ${data.id}`;
     return { ok: true };
   });
@@ -842,7 +863,7 @@ export const deleteSection = createServerFn({ method: "POST" })
   .validator(parseInput(idOnlySchema))
   .handler(async ({ context, data }) => {
     const sql = await getSql();
-    const actor = await requireAdmin(sql, context.userId);
+    const actor = await requireFirmOSAction(sql, context.userId, "work.update", { type: "firm", id: data.id });
     await sql`delete from report_sections where id = ${data.id}`;
     await audit(sql, actor.userId, "section.delete", "section", data.id);
     return { ok: true };
@@ -853,7 +874,7 @@ export const reorderSections = createServerFn({ method: "POST" })
   .validator(parseInput(reorderSectionsSchema))
   .handler(async ({ context, data }) => {
     const sql = await getSql();
-    await requireAdmin(sql, context.userId);
+    await requireFirmOSAction(sql, context.userId, "work.update", { type: "firm" });
     let order = 0;
     for (const id of data.ids) {
       await sql`update report_sections set sort_order = ${order} where id = ${id}`;
@@ -867,7 +888,7 @@ export const saveActivity = createServerFn({ method: "POST" })
   .validator(parseInput(saveActivitySchema))
   .handler(async ({ context, data }) => {
     const sql = await getSql();
-    const actor = await requireAdmin(sql, context.userId);
+    const actor = await requireFirmOSAction(sql, context.userId, "work.update", { type: "firm" });
     const title = data.title.trim();
     if (!title) throw new Error("Activity title is required.");
     const date = data.activityDate || null;
@@ -895,7 +916,7 @@ export const deleteActivity = createServerFn({ method: "POST" })
   .validator(parseInput(idOnlySchema))
   .handler(async ({ context, data }) => {
     const sql = await getSql();
-    const actor = await requireAdmin(sql, context.userId);
+    const actor = await requireFirmOSAction(sql, context.userId, "work.update", { type: "firm", id: data.id });
     await sql`delete from activities where id = ${data.id}`;
     await audit(sql, actor.userId, "activity.delete", "activity", data.id);
     return { ok: true };
@@ -906,7 +927,10 @@ export const duplicatePeriod = createServerFn({ method: "POST" })
   .validator(parseInput(duplicatePeriodSchema))
   .handler(async ({ context, data }) => {
     const sql = await getSql();
-    const actor = await requireAdmin(sql, context.userId);
+    const actor = await requireFirmOSAction(sql, context.userId, "reports.generate", {
+      type: "report",
+      clientId: data.clientId,
+    });
     const from = await sql<{ id: string }>`
       select id from report_periods
       where client_id = ${data.clientId} and year = ${data.fromYear} and month = ${data.fromMonth}`;
@@ -932,21 +956,7 @@ export const savePayment = createServerFn({ method: "POST" })
   .validator(parseInput(savePaymentSchema))
   .handler(async ({ context, data }) => {
     const sql = await getSql();
-    const actor = await requireAdmin(sql, context.userId);
-    if (data.id) {
-      await sql`update payments set
-        status = ${data.status}, amount = ${data.amount ?? null},
-        payment_date = ${data.paymentDate || null}, notes = ${data.notes?.trim() ?? ""},
-        updated_at = now()
-        where id = ${data.id}`;
-      await audit(sql, actor.userId, "payment.update", "payment", data.id);
-      return { id: data.id };
-    }
-    const id = newId();
-    await sql`insert into payments (id, client_id, period_id, year, month, status, amount, payment_date, notes)
-      values (${id}, ${data.clientId}, ${data.periodId ?? null}, ${data.year}, ${data.month}, ${data.status}, ${data.amount ?? null}, ${data.paymentDate || null}, ${data.notes?.trim() ?? ""})`;
-    await audit(sql, actor.userId, "payment.create", "payment", id);
-    return { id };
+    return handleSavePayment(sql, context.userId, data);
   });
 
 export const deletePayment = createServerFn({ method: "POST" })
@@ -954,10 +964,7 @@ export const deletePayment = createServerFn({ method: "POST" })
   .validator(parseInput(idOnlySchema))
   .handler(async ({ context, data }) => {
     const sql = await getSql();
-    const actor = await requireAdmin(sql, context.userId);
-    await sql`delete from payments where id = ${data.id}`;
-    await audit(sql, actor.userId, "payment.delete", "payment", data.id);
-    return { ok: true };
+    return handleDeletePayment(sql, context.userId, data);
   });
 
 export const listPayments = createServerFn({ method: "GET" })
@@ -965,8 +972,7 @@ export const listPayments = createServerFn({ method: "GET" })
   .validator(parseInput(yearMonthSchema))
   .handler(async ({ context, data }) => {
     const sql = await getSql();
-    const actor = await requireActive(sql, context.userId);
-    const settings = await getSettingsRow(sql);
+    await requireFirmOSAction(sql, context.userId, "finance.view", { type: "firm" });
     const rows = await sql<{
       id: string;
       client_id: string;
@@ -983,11 +989,7 @@ export const listPayments = createServerFn({ method: "GET" })
        join clients c on c.id = p.client_id
        where p.year = ${data.year} and p.month = ${data.month}
        order by c.name`;
-    const mapped = rows.map(mapPayment);
-    if (!canSeePayments(actor, settings)) {
-      return mapped.map((p) => ({ ...p, amount: null, notes: "" }));
-    }
-    return mapped;
+    return rows.map(mapPayment);
   });
 
 function summariseWork(sections: Section[]) {
@@ -1014,84 +1016,107 @@ function summariseWork(sections: Section[]) {
   return { bits, total, completed, statusCounts, units };
 }
 
+async function loadDashboard(sql: Sql, year: number, month: number): Promise<Dashboard> {
+  const clients = await sql<Parameters<typeof mapClient>[0]>`
+    select * from clients where is_active = true order by name`;
+  const rows = [];
+  let totalActivities = 0;
+  let completedActivities = 0;
+  let pendingActivities = 0;
+  let paymentsReceived = 0;
+  let paymentsPending = 0;
+  let clientsThisMonth = 0;
+  for (const c of clients) {
+    const period = await sql<{ id: string }>`
+      select id from report_periods where client_id = ${c.id} and year = ${year} and month = ${month}`;
+    const sections = period[0] ? await loadSections(sql, period[0].id) : [];
+    const summary = summariseWork(sections);
+    const pay = await sql<{ status: string; amount: string | number | null }>`
+      select status, amount from payments where client_id = ${c.id} and year = ${year} and month = ${month}`;
+    const received = pay.filter((p) => p.status === "received").reduce((s, p) => s + (toNumber(p.amount) ?? 0), 0);
+    const pending = pay.filter((p) => p.status === "pending").reduce((s, p) => s + (toNumber(p.amount) ?? 0), 0);
+    paymentsReceived += received;
+    paymentsPending += pending;
+    totalActivities += summary.total;
+    completedActivities += summary.completed;
+    pendingActivities += summary.total - summary.completed;
+    if (summary.total > 0) clientsThisMonth += 1;
+    rows.push({
+      client: mapClient(c),
+      activityCount: summary.total,
+      completedCount: summary.completed,
+      workSummary: summary.bits.join(" · ") || "No work recorded",
+      paymentStatus: pay[0]?.status ?? "—",
+      paymentAmount: received || pending || null,
+    });
+  }
+  return {
+    year,
+    month,
+    activeClients: clients.length,
+    clientsThisMonth,
+    totalActivities,
+    completedActivities,
+    pendingActivities,
+    paymentsReceived,
+    paymentsPending,
+    clientRows: rows,
+  };
+}
+
+function applyDashboardFinance(authz: AuthorizationContext, dash: Dashboard): Dashboard {
+  if (canViewFinance(authz)) return dash;
+  return {
+    ...dash,
+    paymentsReceived: 0,
+    paymentsPending: 0,
+    clientRows: dash.clientRows.map((row) => ({
+      ...row,
+      paymentStatus: "—",
+      paymentAmount: null,
+    })),
+  };
+}
+
+function monthSummaryFromDashboard(dash: Dashboard): MonthSummary {
+  return {
+    year: dash.year,
+    month: dash.month,
+    clientsServed: dash.clientsThisMonth,
+    totalActivities: dash.totalActivities,
+    statusCounts: {},
+    paymentsReceived: dash.paymentsReceived,
+    paymentsPending: dash.paymentsPending,
+    rows: dash.clientRows.map((r) => ({
+      client: r.client,
+      workDone: r.workSummary,
+      totalWork: r.activityCount,
+      paymentStatus: r.paymentStatus,
+      paymentAmount: r.paymentAmount,
+    })),
+  };
+}
+
 export const getDashboard = createServerFn({ method: "GET" })
   .middleware([authMiddleware])
   .validator(parseInput(yearMonthSchema))
   .handler(async ({ context, data }): Promise<Dashboard> => {
     const sql = await getSql();
-    const actor = await requireActive(sql, context.userId);
-    if (actor.role === "admin") await seedIfEmpty(sql);
-    const settings = await getSettingsRow(sql);
-    const clients = await sql<Parameters<typeof mapClient>[0]>`
-      select * from clients where is_active = true order by name`;
-    const rows = [];
-    let totalActivities = 0;
-    let completedActivities = 0;
-    let pendingActivities = 0;
-    let paymentsReceived = 0;
-    let paymentsPending = 0;
-    let clientsThisMonth = 0;
-    for (const c of clients) {
-      const period = await sql<{ id: string }>`
-        select id from report_periods where client_id = ${c.id} and year = ${data.year} and month = ${data.month}`;
-      const sections = period[0] ? await loadSections(sql, period[0].id) : [];
-      const summary = summariseWork(sections);
-      const pay = await sql<{ status: string; amount: string | number | null }>`
-        select status, amount from payments where client_id = ${c.id} and year = ${data.year} and month = ${data.month}`;
-      const received = pay.filter((p) => p.status === "received").reduce((s, p) => s + (toNumber(p.amount) ?? 0), 0);
-      const pending = pay.filter((p) => p.status === "pending").reduce((s, p) => s + (toNumber(p.amount) ?? 0), 0);
-      paymentsReceived += received;
-      paymentsPending += pending;
-      totalActivities += summary.total;
-      completedActivities += summary.completed;
-      pendingActivities += summary.total - summary.completed;
-      if (summary.total > 0) clientsThisMonth += 1;
-      const payStatus = pay[0]?.status ?? "—";
-      rows.push({
-        client: mapClient(c),
-        activityCount: summary.total,
-        completedCount: summary.completed,
-        workSummary: summary.bits.join(" · ") || "No work recorded",
-        paymentStatus: canSeePayments(actor, settings) ? payStatus : "—",
-        paymentAmount: canSeePayments(actor, settings) ? received || pending || null : null,
-      });
-    }
-    return {
-      year: data.year,
-      month: data.month,
-      activeClients: clients.length,
-      clientsThisMonth,
-      totalActivities,
-      completedActivities,
-      pendingActivities,
-      paymentsReceived: canSeePayments(actor, settings) ? paymentsReceived : 0,
-      paymentsPending: canSeePayments(actor, settings) ? paymentsPending : 0,
-      clientRows: rows,
-    };
+    return handleGetDashboard(sql, context.userId, data, {
+      afterAuthorize: async (authz) => {
+        if (hasPermission(authz, "firm.manage")) await seedIfEmpty(sql);
+      },
+    });
   });
 
 export const getMonthSummary = createServerFn({ method: "GET" })
   .middleware([authMiddleware])
   .validator(parseInput(yearMonthSchema))
-  .handler(async ({ data }): Promise<MonthSummary> => {
-    const dash = await getDashboard({ data });
-    const statusCounts: Record<string, number> = {};
-    return {
-      year: data.year,
-      month: data.month,
-      clientsServed: dash.clientsThisMonth,
-      totalActivities: dash.totalActivities,
-      statusCounts,
-      paymentsReceived: dash.paymentsReceived,
-      paymentsPending: dash.paymentsPending,
-      rows: dash.clientRows.map((r) => ({
-        client: r.client,
-        workDone: r.workSummary,
-        totalWork: r.activityCount,
-        paymentStatus: r.paymentStatus,
-        paymentAmount: r.paymentAmount,
-      })),
-    };
+  .handler(async ({ context, data }): Promise<MonthSummary> => {
+    const sql = await getSql();
+    const authz = await requireFirmOSAction(sql, context.userId, "work.view", { type: "firm" });
+    const dash = applyDashboardFinance(authz, await loadDashboard(sql, data.year, data.month));
+    return monthSummaryFromDashboard(dash);
   });
 
 export const getFounderSummary = createServerFn({ method: "GET" })
@@ -1099,8 +1124,8 @@ export const getFounderSummary = createServerFn({ method: "GET" })
   .validator(parseInput(yearMonthSchema))
   .handler(async ({ context, data }): Promise<FounderSummary> => {
     const sql = await getSql();
-    await requireActive(sql, context.userId);
-    const dash = await getDashboard({ data });
+    const authz = await requireFirmOSAction(sql, context.userId, "reports.view", { type: "report" });
+    const dash = applyDashboardFinance(authz, await loadDashboard(sql, data.year, data.month));
     const units = new Map<string, number>();
     const services = new Map<string, number>();
     const statusCounts: Record<string, number> = {};
@@ -1122,23 +1147,11 @@ export const getFounderSummary = createServerFn({ method: "GET" })
       }
     }
     return {
-      year: data.year,
-      month: data.month,
-      clientsServed: dash.clientsThisMonth,
-      totalActivities: dash.totalActivities,
+      ...monthSummaryFromDashboard(dash),
       statusCounts,
-      paymentsReceived: dash.paymentsReceived,
-      paymentsPending: dash.paymentsPending,
-      rows: dash.clientRows.map((r) => ({
-        client: r.client,
-        workDone: r.workSummary,
-        totalWork: r.activityCount,
-        paymentStatus: r.paymentStatus,
-        paymentAmount: r.paymentAmount,
-      })),
       activeClients: dash.activeClients,
       clientsWithNoWork: noWork,
-      clientsWithOutstanding: outstanding,
+      clientsWithOutstanding: canViewFinance(authz) ? outstanding : [],
       units: [...units.entries()].map(([unit, quantity]) => ({ unit, quantity })),
       services: [...services.entries()].map(([name, sections]) => ({ name, sections })),
     };
@@ -1149,12 +1162,15 @@ export const getClientReport = createServerFn({ method: "GET" })
   .validator(parseInput(workspaceQuerySchema))
   .handler(async ({ context, data }): Promise<ClientReport> => {
     const sql = await getSql();
-    const actor = await requireActive(sql, context.userId);
+    const authz = await requireFirmOSAction(sql, context.userId, "reports.view", {
+      type: "report",
+      clientId: data.clientId,
+    });
     const settings = await getSettingsRow(sql);
-    const ws = await getWorkspace({ data });
+    const ws = await loadWorkspace(sql, data.clientId, data.year, data.month);
     await sql`insert into report_exports (id, kind, client_id, year, month, generated_by)
-      values (${newId()}, ${"client"}, ${data.clientId}, ${data.year}, ${data.month}, ${actor.userId})`;
-    return redactPayments(actor, settings, {
+      values (${newId()}, ${"client"}, ${data.clientId}, ${data.year}, ${data.month}, ${authz.userId})`;
+    return redactReportFinance(authz, {
       client: ws.client,
       period: ws.period,
       sections: ws.sections,
@@ -1168,13 +1184,13 @@ export const getCombinedReport = createServerFn({ method: "GET" })
   .validator(parseInput(combinedReportSchema))
   .handler(async ({ context, data }): Promise<{ reports: ClientReport[]; settings: Settings }> => {
     const sql = await getSql();
-    const actor = await requireActive(sql, context.userId);
+    const authz = await requireFirmOSAction(sql, context.userId, "reports.generate", { type: "report" });
     const settings = await getSettingsRow(sql);
     const reports: ClientReport[] = [];
     for (const clientId of data.clientIds) {
-      const ws = await getWorkspace({ data: { clientId, year: data.year, month: data.month } });
+      const ws = await loadWorkspace(sql, clientId, data.year, data.month);
       reports.push(
-        redactPayments(actor, settings, {
+        redactReportFinance(authz, {
           client: ws.client,
           period: ws.period,
           sections: ws.sections,
@@ -1184,7 +1200,7 @@ export const getCombinedReport = createServerFn({ method: "GET" })
       );
     }
     await sql`insert into report_exports (id, kind, year, month, client_ids, generated_by)
-      values (${newId()}, ${"combined"}, ${data.year}, ${data.month}, ${JSON.stringify(data.clientIds)}, ${actor.userId})`;
+      values (${newId()}, ${"combined"}, ${data.year}, ${data.month}, ${JSON.stringify(data.clientIds)}, ${authz.userId})`;
     return { reports, settings };
   });
 
@@ -1192,7 +1208,7 @@ export const listUsers = createServerFn({ method: "GET" })
   .middleware([authMiddleware])
   .handler(async ({ context }): Promise<UserRow[]> => {
     const sql = await getSql();
-    await requireAdmin(sql, context.userId);
+    await requireFirmOSAction(sql, context.userId, "users.view", { type: "firm" });
     const rows = await sql<{
       user_id: string;
       name: string;
@@ -1219,26 +1235,7 @@ export const updateUserAccess = createServerFn({ method: "POST" })
   .validator(parseInput(updateUserAccessSchema))
   .handler(async ({ context, data }) => {
     const sql = await getSql();
-    const actor = await requireAdmin(sql, context.userId);
-    if (data.userId === actor.userId && data.isActive === false) {
-      throw new Error("You cannot deactivate your own account.");
-    }
-    if (data.role === "viewer" || data.isActive === false) {
-      const admins = await sql<{ n: number }>`
-        select count(*)::int as n from app_profiles
-        where role = 'admin' and is_active = true and user_id <> ${data.userId}`;
-      if ((admins[0]?.n ?? 0) === 0 && data.userId === actor.userId) {
-        throw new Error("Keep at least one active admin.");
-      }
-    }
-    if (data.role) {
-      await sql`update app_profiles set role = ${data.role}, updated_at = now() where user_id = ${data.userId}`;
-    }
-    if (data.isActive !== undefined) {
-      await sql`update app_profiles set is_active = ${data.isActive}, updated_at = now() where user_id = ${data.userId}`;
-    }
-    await audit(sql, actor.userId, "user.update", "user", data.userId, `${data.role ?? ""} ${data.isActive ?? ""}`);
-    return { ok: true };
+    return handleUpdateUserAccess(sql, context.userId, data);
   });
 
 export const createEmailUser = createServerFn({ method: "POST" })
@@ -1246,7 +1243,7 @@ export const createEmailUser = createServerFn({ method: "POST" })
   .validator(parseInput(createEmailUserSchema))
   .handler(async ({ context, data }) => {
     const sql = await getSql();
-    const actor = await requireAdmin(sql, context.userId);
+    const actor = await requireFirmOSAction(sql, context.userId, "users.create", { type: "firm" });
     const email = data.email.trim().toLowerCase();
     const name = data.name.trim();
     if (!email || !name) throw new Error("Name and email are required.");
@@ -1268,7 +1265,9 @@ export const listAudit = createServerFn({ method: "GET" })
   .middleware([authMiddleware])
   .handler(async ({ context }): Promise<AuditRow[]> => {
     const sql = await getSql();
-    await requireAdmin(sql, context.userId);
+    await requireFirmOSAction(sql, context.userId, "audit.view", { type: "audit_event" });
+    // Monthly audit_logs has no firm_id. Listing stays on that table after
+    // FirmOS permission check; FirmOS audit_events remain separately tenant-scoped.
     const rows = await sql<{
       id: string;
       user_id: string;
@@ -1295,7 +1294,7 @@ export const createBackup = createServerFn({ method: "POST" })
   .validator(parseInput(createBackupSchema))
   .handler(async ({ context, data }) => {
     const sql = await getSql();
-    const actor = await requireAdmin(sql, context.userId);
+    const actor = await requireFirmOSAction(sql, context.userId, "backup.create", { type: "backup" });
     const payload = await dumpBusiness(sql);
     const id = newId();
     const payloadJson = JSON.stringify(payload);
@@ -1309,7 +1308,7 @@ export const listBackups = createServerFn({ method: "GET" })
   .middleware([authMiddleware])
   .handler(async ({ context }): Promise<BackupRow[]> => {
     const sql = await getSql();
-    await requireAdmin(sql, context.userId);
+    await requireFirmOSAction(sql, context.userId, "backup.create", { type: "backup" });
     const rows = await sql<{ id: string; created_by: string; note: string; created_at: string }>`
       select id, created_by, note, created_at from backups order by created_at desc limit 30`;
     return rows.map((r) => ({
@@ -1325,30 +1324,7 @@ export const restoreBackup = createServerFn({ method: "POST" })
   .validator(parseInput(restoreBackupSchema))
   .handler(async ({ context, data }) => {
     const sql = await getSql();
-    const actor = await requireAdmin(sql, context.userId);
-    let payload = data.payload;
-    if (payload === undefined && data.id) {
-      const rows = await sql<{ payload: string }>`select payload from backups where id = ${data.id}`;
-      if (!rows[0]) throw new Error("Backup not found.");
-      try {
-        payload = JSON.parse(rows[0].payload) as unknown;
-      } catch {
-        throw new Error("Backup file is not valid JSON.");
-      }
-    }
-    if (payload === undefined) throw new Error("Nothing to restore.");
-    validateBackupPayload(payload);
-    const safety = await dumpBusiness(sql);
-    await sql`insert into backups (id, created_by, note, payload)
-      values (${newId()}, ${actor.userId}, ${"Safety copy before restore"}, ${JSON.stringify(safety)})`;
-    try {
-      await restoreBusiness(sql, payload);
-    } catch (err) {
-      if (err instanceof Error && err.name === "BackupValidationError") throw err;
-      throw new Error("Restore failed. Existing data was left unchanged.");
-    }
-    await audit(sql, actor.userId, "backup.restore", "backup", data.id ?? "", "");
-    return { ok: true };
+    return handleRestoreBackup(sql, context.userId, data);
   });
 
 

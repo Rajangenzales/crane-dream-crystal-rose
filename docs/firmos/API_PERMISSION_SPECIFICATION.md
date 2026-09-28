@@ -69,7 +69,7 @@ only. Permission **keys** are a global catalog; firms compose them into roles.
 - Authorization is enforced server-side for every protected action.
 - Input is validated at API boundaries.
 - Errors returned to users are sanitized and receive a reference ID where appropriate. FirmOS authorization denials use `FirmOSAuthorizationError`: the public payload is only `publicMessage` plus `referenceId`. Permission keys and deny reasons stay in `error_events.internal_detail` for server tracing.
-- FirmOS bootstrap writes `audit_events` (tenant-scoped, same transaction as firm creation). Monthly `audit_logs` is unchanged and remains the existing `listAudit` source.
+- FirmOS bootstrap writes `audit_events` (tenant-scoped, same transaction as firm creation). Monthly `audit_logs` is still written by existing monthly mutations. `listAudit` requires `audit.view` and still reads `audit_logs` in this phase because those rows have no `firm_id`; FirmOS `audit_events` remain tenant-filtered and are not mixed across firms.
 - Financial mutations use transactions and preserve audit information.
 
 ## V1 Resource Authorization
@@ -141,3 +141,36 @@ The firm **Admin** role is the tenant administrator for that Firm. It is not a F
 Admin receives all **tenant** catalog keys except `backup.restore`. Admin does not receive Platform or Technical keys.
 
 Manager, Member, and Viewer receive only their explicit tenant grants. Developer/IT is not a bootstrap Firm role. Platform Admin is not a Firm membership.
+
+## Phase 7 existing API gates
+
+Protected server functions in `src/lib/api.ts` resolve membership with `requireFirmOSAction` and `authorize()`. `app_profiles.role` is not an authorization bypass. `viewers_see_payments` is not a finance grant. `getSessionWorkspace` remains session-only.
+
+Monthly application tables still have no `firm_id`. Resource `firmId` is the membership-resolved tenant. Multi-firm production use is unsupported until those tables are tenant-scoped.
+
+| Server function | Permission |
+|---|---|
+| `getSessionWorkspace` | authenticated session only |
+| `updateSettings` | `firm.manage` |
+| `listClients` | `clients.view` |
+| `createClient` | `clients.create` |
+| `updateClient` | `clients.edit` or `clients.archive` |
+| `listServices` | `services.view` |
+| `createService` | `services.create` |
+| `updateService` / `assignClientService` / `unassignClientService` | `services.edit` |
+| `getWorkspace` / `getDashboard` / `getMonthSummary` | `work.view` (finance fields also need `finance.view`) |
+| section / activity mutations | `work.update` |
+| `duplicatePeriod` / `getCombinedReport` | `reports.generate` |
+| `getFounderSummary` / `getClientReport` | `reports.view` |
+| `savePayment` | `payments.create` or `payments.correct` |
+| `deletePayment` | `payments.correct` |
+| `listPayments` | `finance.view` |
+| `listUsers` | `users.view` |
+| `createEmailUser` | `users.create` |
+| `updateUserAccess` | `users.edit` and/or `users.disable` |
+| `listAudit` | `audit.view` |
+| `createBackup` / `listBackups` | `backup.create` |
+| `restoreBackup` | `backup.restore` |
+
+`restoreBackup` is denied for ordinary Firm Admin. Platform and Technical authority are not used by these gates.
+
