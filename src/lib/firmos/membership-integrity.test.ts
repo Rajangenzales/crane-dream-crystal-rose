@@ -5,7 +5,11 @@ import { test } from "node:test";
 import { createTestSql } from "../db-test-utils.ts";
 import { newId } from "../utils.ts";
 import { ADMIN_PERMISSIONS, DEFAULT_FIRM_ROLES } from "./bootstrap.ts";
-import { FIRMOS_PERMISSIONS } from "./domain.ts";
+import {
+  FIRMOS_PERMISSIONS,
+  FIRMOS_PLATFORM_PERMISSIONS,
+  FIRMOS_TECHNICAL_PERMISSIONS,
+} from "./domain.ts";
 import { resolveAuthorization } from "./resolve-authorization.ts";
 
 const MIGRATIONS = join(process.cwd(), "migrations");
@@ -160,7 +164,12 @@ test("deleting a firm cascades roles but keeps the global permission catalog", a
 
   const after = await sql<{ n: string }>`select count(*)::text as n from permissions`;
   assert.equal(after[0]?.n, before[0]?.n);
-  assert.equal(Number(after[0]?.n), FIRMOS_PERMISSIONS.length);
+  assert.equal(
+    Number(after[0]?.n),
+    FIRMOS_PERMISSIONS.length +
+      FIRMOS_PLATFORM_PERMISSIONS.length +
+      FIRMOS_TECHNICAL_PERMISSIONS.length,
+  );
 
   const droppedRoles = await sql<{ n: string }>`
     select count(*)::text as n from roles where firm_id = ${b.firmId}
