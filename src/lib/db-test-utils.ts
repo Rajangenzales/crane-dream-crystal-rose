@@ -1,6 +1,7 @@
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { PGlite } from "@electric-sql/pglite";
+import { pendingMigrations } from "../../scripts/migration-plan.mjs";
 import type { Sql } from "./db.ts";
 
 function toSql(run: <T>(text: string, params: unknown[]) => Promise<T[]>): Sql {
@@ -17,12 +18,25 @@ function toSql(run: <T>(text: string, params: unknown[]) => Promise<T[]>): Sql {
   return sql;
 }
 
+export function migrationsDirectory(): string {
+  return join(process.cwd(), "migrations");
+}
+
+/**
+ * Empty PGLite with the same migration set and order as `scripts/migrate.mjs`
+ * / `src/lib/db.ts` (basename `localeCompare`, `_migrations` bookkeeping).
+ */
 export async function createTestSql(): Promise<{ sql: Sql; pg: PGlite }> {
   const pg = new PGlite();
   await pg.waitReady;
-  const root = join(process.cwd());
-  for (const name of ["0001_auth.sql", "0002_monthly.sql", "0003_bootstrap.sql"]) {
-    await pg.exec(readFileSync(join(root, "migrations", name), "utf8"));
+  await pg.exec(
+    "create table if not exists _migrations (name text primary key, applied_at timestamptz not null default now())",
+  );
+  const dir = migrationsDirectory();
+  const entries = readdirSync(dir);
+  for (const { name } of pendingMigrations(entries, [])) {
+    await pg.exec(readFileSync(join(dir, name), "utf8"));
+    await pg.query("insert into _migrations (name) values ($1)", [name]);
   }
   const sql = toSql(async <T>(text: string, params: unknown[]) => {
     const result = await pg.query<T>(text, params);
