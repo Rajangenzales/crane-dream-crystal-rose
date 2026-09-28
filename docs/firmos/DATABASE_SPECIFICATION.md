@@ -60,7 +60,7 @@ Deleting a firm cascades its roles, memberships, and `membership_roles` rows. Th
 
 `error_events` stores sanitized authorization failures keyed by `reference_id`. `internal_detail` is for server-side tracing and is never returned to the client.
 
-Monthly `audit_logs` is unchanged. It is not replaced by `audit_events` and is still the source for existing `listAudit` behavior.
+Monthly `audit_logs` is unchanged as a write target. `listAudit` requires `audit.view` and still reads `audit_logs` (no `firm_id` on that table). FirmOS `audit_events` stay tenant-scoped and are not cross-firm.
 
 ## Financial Rule
 Payments and allocations are separate from work completion. Corrections must preserve an auditable history rather than silently rewriting financial history.
