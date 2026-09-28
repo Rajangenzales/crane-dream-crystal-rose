@@ -4,16 +4,22 @@ import { getSql, type Sql } from "@/lib/db";
 import { monthTitle } from "@/lib/catalog";
 import { toNumber } from "@/lib/format";
 import { newId } from "@/lib/utils";
-import { dumpBusiness, restoreBusiness, validateBackupPayload } from "@/lib/backup";
+import { dumpBusiness } from "@/lib/backup";
 import { provisionActor } from "@/lib/provision";
 import {
   canViewFinance,
   clientUpdatePermission,
-  paymentSavePermission,
   redactPaymentRecords,
   requireFirmOSAction,
-  userAccessPermissions,
 } from "@/lib/firmos/legacy-api-auth";
+import {
+  handleDeletePayment,
+  handleGetDashboard,
+  handleGetWorkspace,
+  handleRestoreBackup,
+  handleSavePayment,
+  handleUpdateUserAccess,
+} from "@/lib/firmos/legacy-api-handlers";
 import { hasPermission, type AuthorizationContext } from "@/lib/firmos/domain";
 import {
   addSectionSchema,
@@ -821,10 +827,9 @@ export const getWorkspace = createServerFn({ method: "GET" })
   .validator(parseInput(workspaceQuerySchema))
   .handler(async ({ context, data }): Promise<Workspace> => {
     const sql = await getSql();
-    const authz = await requireFirmOSAction(sql, context.userId, "work.view", { type: "firm" });
-    const ws = await loadWorkspace(sql, data.clientId, data.year, data.month);
-    ws.payments = redactPaymentRecords(authz, ws.payments);
-    return ws;
+    return handleGetWorkspace(sql, context.userId, () =>
+      loadWorkspace(sql, data.clientId, data.year, data.month),
+    );
   });
 
 export const addSection = createServerFn({ method: "POST" })
@@ -951,26 +956,7 @@ export const savePayment = createServerFn({ method: "POST" })
   .validator(parseInput(savePaymentSchema))
   .handler(async ({ context, data }) => {
     const sql = await getSql();
-    const actor = await requireFirmOSAction(
-      sql,
-      context.userId,
-      paymentSavePermission(data.id),
-      { type: "payment", id: data.id, clientId: data.clientId },
-    );
-    if (data.id) {
-      await sql`update payments set
-        status = ${data.status}, amount = ${data.amount ?? null},
-        payment_date = ${data.paymentDate || null}, notes = ${data.notes?.trim() ?? ""},
-        updated_at = now()
-        where id = ${data.id}`;
-      await audit(sql, actor.userId, "payment.update", "payment", data.id);
-      return { id: data.id };
-    }
-    const id = newId();
-    await sql`insert into payments (id, client_id, period_id, year, month, status, amount, payment_date, notes)
-      values (${id}, ${data.clientId}, ${data.periodId ?? null}, ${data.year}, ${data.month}, ${data.status}, ${data.amount ?? null}, ${data.paymentDate || null}, ${data.notes?.trim() ?? ""})`;
-    await audit(sql, actor.userId, "payment.create", "payment", id);
-    return { id };
+    return handleSavePayment(sql, context.userId, data);
   });
 
 export const deletePayment = createServerFn({ method: "POST" })
@@ -978,13 +964,7 @@ export const deletePayment = createServerFn({ method: "POST" })
   .validator(parseInput(idOnlySchema))
   .handler(async ({ context, data }) => {
     const sql = await getSql();
-    const actor = await requireFirmOSAction(sql, context.userId, "payments.correct", {
-      type: "payment",
-      id: data.id,
-    });
-    await sql`delete from payments where id = ${data.id}`;
-    await audit(sql, actor.userId, "payment.delete", "payment", data.id);
-    return { ok: true };
+    return handleDeletePayment(sql, context.userId, data);
   });
 
 export const listPayments = createServerFn({ method: "GET" })
@@ -1122,10 +1102,11 @@ export const getDashboard = createServerFn({ method: "GET" })
   .validator(parseInput(yearMonthSchema))
   .handler(async ({ context, data }): Promise<Dashboard> => {
     const sql = await getSql();
-    const authz = await requireFirmOSAction(sql, context.userId, "work.view", { type: "firm" });
-    if (hasPermission(authz, "firm.manage")) await seedIfEmpty(sql);
-    const dash = await loadDashboard(sql, data.year, data.month);
-    return applyDashboardFinance(authz, dash);
+    return handleGetDashboard(sql, context.userId, data, {
+      afterAuthorize: async (authz) => {
+        if (hasPermission(authz, "firm.manage")) await seedIfEmpty(sql);
+      },
+    });
   });
 
 export const getMonthSummary = createServerFn({ method: "GET" })
@@ -1254,31 +1235,7 @@ export const updateUserAccess = createServerFn({ method: "POST" })
   .validator(parseInput(updateUserAccessSchema))
   .handler(async ({ context, data }) => {
     const sql = await getSql();
-    const actor = await requireFirmOSAction(
-      sql,
-      context.userId,
-      userAccessPermissions({ role: data.role, isActive: data.isActive }),
-      { type: "membership", id: data.userId },
-    );
-    if (data.userId === actor.userId && data.isActive === false) {
-      throw new Error("You cannot deactivate your own account.");
-    }
-    if (data.role === "viewer" || data.isActive === false) {
-      const admins = await sql<{ n: number }>`
-        select count(*)::int as n from app_profiles
-        where role = 'admin' and is_active = true and user_id <> ${data.userId}`;
-      if ((admins[0]?.n ?? 0) === 0 && data.userId === actor.userId) {
-        throw new Error("Keep at least one active admin.");
-      }
-    }
-    if (data.role) {
-      await sql`update app_profiles set role = ${data.role}, updated_at = now() where user_id = ${data.userId}`;
-    }
-    if (data.isActive !== undefined) {
-      await sql`update app_profiles set is_active = ${data.isActive}, updated_at = now() where user_id = ${data.userId}`;
-    }
-    await audit(sql, actor.userId, "user.update", "user", data.userId, `${data.role ?? ""} ${data.isActive ?? ""}`);
-    return { ok: true };
+    return handleUpdateUserAccess(sql, context.userId, data);
   });
 
 export const createEmailUser = createServerFn({ method: "POST" })
@@ -1367,30 +1324,7 @@ export const restoreBackup = createServerFn({ method: "POST" })
   .validator(parseInput(restoreBackupSchema))
   .handler(async ({ context, data }) => {
     const sql = await getSql();
-    const actor = await requireFirmOSAction(sql, context.userId, "backup.restore", { type: "backup" });
-    let payload = data.payload;
-    if (payload === undefined && data.id) {
-      const rows = await sql<{ payload: string }>`select payload from backups where id = ${data.id}`;
-      if (!rows[0]) throw new Error("Backup not found.");
-      try {
-        payload = JSON.parse(rows[0].payload) as unknown;
-      } catch {
-        throw new Error("Backup file is not valid JSON.");
-      }
-    }
-    if (payload === undefined) throw new Error("Nothing to restore.");
-    validateBackupPayload(payload);
-    const safety = await dumpBusiness(sql);
-    await sql`insert into backups (id, created_by, note, payload)
-      values (${newId()}, ${actor.userId}, ${"Safety copy before restore"}, ${JSON.stringify(safety)})`;
-    try {
-      await restoreBusiness(sql, payload);
-    } catch (err) {
-      if (err instanceof Error && err.name === "BackupValidationError") throw err;
-      throw new Error("Restore failed. Existing data was left unchanged.");
-    }
-    await audit(sql, actor.userId, "backup.restore", "backup", data.id ?? "", "");
-    return { ok: true };
+    return handleRestoreBackup(sql, context.userId, data);
   });
 
 

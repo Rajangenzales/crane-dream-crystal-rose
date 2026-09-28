@@ -75,6 +75,10 @@ test("api.ts no longer uses requireAdmin or requireActive", () => {
   assert.equal(session.includes("requireFirmOSAction"), false);
   assert.equal(source.includes("getDashboard({"), false);
   assert.equal(source.includes("getWorkspace({"), false);
+  assert.equal(source.includes('from "@/lib/firmos/legacy-api-handlers"'), true);
+  assert.equal(source.includes("handleUpdateUserAccess(sql, context.userId, data)"), true);
+  assert.equal(source.includes("handleSavePayment(sql, context.userId, data)"), true);
+  assert.equal(source.includes("handleRestoreBackup(sql, context.userId, data)"), true);
 });
 
 test("legacy-api-auth does not deserialize privilege context", () => {
@@ -93,6 +97,8 @@ test("client/payment/user mutation pickers stay split", () => {
   assert.equal(paymentSavePermission("pay-1"), "payments.correct");
   assert.deepEqual(userAccessPermissions({ role: "viewer" }), ["users.edit"]);
   assert.deepEqual(userAccessPermissions({ isActive: false }), ["users.disable"]);
+  assert.deepEqual(userAccessPermissions({ isActive: true }), ["users.disable"]);
+  assert.deepEqual(userAccessPermissions({}), []);
   assert.deepEqual(userAccessPermissions({ role: "admin", isActive: false }), [
     "users.edit",
     "users.disable",

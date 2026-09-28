@@ -68,8 +68,7 @@ export function userAccessPermissions(input: {
 }): FirmOSPermission[] {
   const keys: FirmOSPermission[] = [];
   if (input.role !== undefined) keys.push("users.edit");
-  if (input.isActive === false) keys.push("users.disable");
-  if (keys.length === 0) keys.push("users.edit");
+  if (input.isActive !== undefined) keys.push("users.disable");
   return keys;
 }
 
