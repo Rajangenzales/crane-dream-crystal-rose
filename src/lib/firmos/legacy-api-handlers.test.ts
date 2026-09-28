@@ -102,7 +102,7 @@ test("updateUserAccess derives permissions from the supplied mutation", async ()
   const afterDisable = await sql<{ is_active: boolean }>`
     select is_active from app_profiles where user_id = 'target-u'
   `;
-  assert.equal(afterDisable[0]?.is_active === true || afterDisable[0]?.is_active === "t", false);
+  assert.equal(afterDisable[0]?.is_active, false);
 
   await insertUser(sql, "member-u");
   const memberFirm = await executeFirmBootstrap(sql, "member-u", {
@@ -170,7 +170,7 @@ test("updateUserAccess requires both permissions when both fields are supplied",
     select role, is_active from app_profiles where user_id = 'target-edit'
   `;
   assert.equal(unchanged[0]?.role, "admin");
-  assert.equal(unchanged[0]?.is_active === true || unchanged[0]?.is_active === "t", true);
+  assert.equal(unchanged[0]?.is_active, true);
 });
 
 test("savePayment and deletePayment authorize create vs correct at the handler", async () => {
