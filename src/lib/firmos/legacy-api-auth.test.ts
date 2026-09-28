@@ -8,8 +8,15 @@ import { executeFirmBootstrap } from "./bootstrap-core.ts";
 import { ADMIN_PERMISSIONS, DEFAULT_FIRM_ROLES } from "./bootstrap.ts";
 import {
   authorize,
+  authorizePlatform,
+  authorizeTechnical,
   FIRMOS_PERMISSIONS,
+  FIRMOS_PLATFORM_PERMISSIONS,
+  FIRMOS_TECHNICAL_PERMISSIONS,
   hasPermission,
+  isFirmOSPermission,
+  platformAdminAuthority,
+  technicalOperatorAuthority,
   type FirmOSPermission,
 } from "./domain.ts";
 import { FirmOSAuthorizationError, FIRMOS_PUBLIC_AUTHORIZATION_MESSAGE } from "./errors.ts";
@@ -61,6 +68,13 @@ test("api.ts no longer uses requireAdmin or requireActive", () => {
   assert.equal(source.includes("canSeePayments"), false);
   assert.equal(source.includes("requireFirmOSAction"), true);
   assert.equal(source.includes("JSON.parse(JSON.stringify"), false);
+  const session = source.slice(
+    source.indexOf("export const getSessionWorkspace"),
+    source.indexOf("export const updateSettings"),
+  );
+  assert.equal(session.includes("requireFirmOSAction"), false);
+  assert.equal(source.includes("getDashboard({"), false);
+  assert.equal(source.includes("getWorkspace({"), false);
 });
 
 test("legacy-api-auth does not deserialize privilege context", () => {
@@ -305,6 +319,115 @@ test("guessed firm id cannot override the resolved tenant", async () => {
   const otherFirmId = newId();
   assert.deepEqual(
     authorize(ctx, "clients.view", { type: "client", firmId: otherFirmId }),
+    { ok: false, reason: "tenant_mismatch" },
+  );
+});
+
+test("services, work, and payments keys are enforced independently", async () => {
+  const { sql } = await createPhase7Sql();
+  await insertUser(sql, "member-svc");
+  const memberFirm = await executeFirmBootstrap(sql, "member-svc", {
+    firmName: "Svc",
+    slug: "svc-p7",
+  });
+  await assignNamedRole(sql, memberFirm.ownerMembershipId, memberFirm.firmId, "Member");
+  await requireFirmOSAction(sql, "member-svc", "services.view", { type: "firm" });
+  await requireFirmOSAction(sql, "member-svc", "clients.view", { type: "client" });
+  await requireFirmOSAction(sql, "member-svc", "work.view", { type: "firm" });
+  for (const key of [
+    "services.create",
+    "services.edit",
+    "work.update",
+    "payments.create",
+    "payments.correct",
+    "finance.view",
+    "clients.archive",
+    "clients.create",
+  ] as const) {
+    await assert.rejects(
+      () => requireFirmOSAction(sql, "member-svc", key, { type: "firm" }),
+      FirmOSAuthorizationError,
+    );
+  }
+
+  await insertUser(sql, "mgr-pay");
+  const mgrFirm = await executeFirmBootstrap(sql, "mgr-pay", {
+    firmName: "Pay",
+    slug: "pay-p7",
+  });
+  await assignNamedRole(sql, mgrFirm.ownerMembershipId, mgrFirm.firmId, "Manager");
+  await requireFirmOSAction(sql, "mgr-pay", "services.create", { type: "firm" });
+  await requireFirmOSAction(sql, "mgr-pay", "services.edit", { type: "service" });
+  await requireFirmOSAction(sql, "mgr-pay", "work.update", { type: "firm" });
+  await requireFirmOSAction(sql, "mgr-pay", "payments.create", { type: "payment" });
+  await requireFirmOSAction(sql, "mgr-pay", "finance.view", { type: "firm" });
+  await assert.rejects(
+    () => requireFirmOSAction(sql, "mgr-pay", "payments.correct", { type: "payment" }),
+    FirmOSAuthorizationError,
+  );
+
+  await insertUser(sql, "admin-pay");
+  await executeFirmBootstrap(sql, "admin-pay", { firmName: "AdminPay", slug: "admin-pay-p7" });
+  await requireFirmOSAction(sql, "admin-pay", "payments.create", { type: "payment" });
+  await requireFirmOSAction(sql, "admin-pay", "payments.correct", { type: "payment" });
+  await requireFirmOSAction(sql, "admin-pay", "finance.view", { type: "firm" });
+  await requireFirmOSAction(sql, "admin-pay", "audit.view", { type: "audit_event" });
+});
+
+test("Firm membership cannot satisfy Platform or Technical authorization", async () => {
+  const { sql } = await createPhase7Sql();
+  await insertUser(sql, "admin-plane");
+  await executeFirmBootstrap(sql, "admin-plane", { firmName: "Plane", slug: "plane-p7" });
+  const ctx = await requireFirmOSAction(sql, "admin-plane", "firm.manage", { type: "firm" });
+  for (const key of [...FIRMOS_PLATFORM_PERMISSIONS, ...FIRMOS_TECHNICAL_PERMISSIONS]) {
+    assert.equal(isFirmOSPermission(key), false);
+    assert.equal([...ctx.permissions].includes(key as FirmOSPermission), false);
+    assert.deepEqual(authorize(ctx, key, { type: "firm", firmId: ctx.firmId }), {
+      ok: false,
+      reason: "permission_missing",
+    });
+  }
+  const platform = platformAdminAuthority("operator-1");
+  const technical = technicalOperatorAuthority("it-1");
+  assert.deepEqual(authorizePlatform(platform, "clients.view"), {
+    ok: false,
+    reason: "permission_missing",
+  });
+  assert.deepEqual(authorizeTechnical(technical, "finance.view"), {
+    ok: false,
+    reason: "permission_missing",
+  });
+  assert.deepEqual(authorizePlatform(platform, "diagnostics.view"), {
+    ok: false,
+    reason: "permission_missing",
+  });
+  assert.deepEqual(authorizeTechnical(technical, "platform.tenant.view"), {
+    ok: false,
+    reason: "permission_missing",
+  });
+});
+
+test("requireFirmOSAction ignores client firmId and privilege fields", async () => {
+  const helper = readFileSync(join(process.cwd(), "src/lib/firmos/legacy-api-auth.ts"), "utf8");
+  assert.equal(helper.includes("resolveAuthorization(sql, { userId })"), true);
+  assert.equal(helper.includes("firmId: resolved.context.firmId"), true);
+  assert.equal(helper.includes("input.firmId"), false);
+  assert.equal(helper.includes("request.permissions"), false);
+
+  const { sql } = await createPhase7Sql();
+  await insertUser(sql, "hint");
+  const created = await executeFirmBootstrap(sql, "hint", { firmName: "Hint", slug: "hint-p7" });
+  const ctx = await requireFirmOSAction(sql, "hint", "clients.view", {
+    type: "client",
+    id: "client-from-request",
+  });
+  assert.equal(ctx.firmId, created.firmId);
+  assert.deepEqual(
+    authorize(ctx, "clients.view", {
+      type: "client",
+      firmId: newId(),
+      id: "client-from-request",
+    }),
     { ok: false, reason: "tenant_mismatch" },
   );
 });
